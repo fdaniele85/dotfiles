@@ -8,3 +8,5 @@ then
     echo "Creating backup dir '$DIR/backups'"
     mkdir "$DIR/backups"
 fi
+
+bash "$DIR/scripts/link.sh" "$DIR"
