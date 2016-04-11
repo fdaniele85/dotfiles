@@ -8,4 +8,4 @@ then
     . $SSJHOME/Ssj.sh
 fi
 
-UPDATE_DOTFILES_DAYS=1
+export UPDATE_DOTFILES_DAYS=2
