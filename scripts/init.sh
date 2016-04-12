@@ -1,19 +1,6 @@
 #! /bin/bash
 
-if [[ ! -d "$HOME/.oh-my-zsh" ]]
-then
-    read -p "Do you wish to install oh-my-zsh?" yn
-    case $yn in
-        [Yy]* )
-            cd
-            sh -c "$(wget https://raw.githubusercontent.com/robbyrussell/oh-my-zsh/master/tools/install.sh -O -)"
-            cd -
-	          break;;
-        * )
-            break;;
-    esac
-done
-
+# Create backup dir 
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 DIR=$(echo $DIR | sed 's_/scripts__')
 
@@ -22,5 +9,16 @@ then
     echo "Creating backup dir '$DIR/backups'"
     mkdir "$DIR/backups"
 fi
+
+for file in $DIR/scripts/installers/*.sh
+do
+    name=$(basename $file | sed 's/\.sh//')
+    read -p "Do you wish to install $name? " yn
+    case $yn in
+        [Yy]* )
+	    bash "$file" "$DIR/backups"
+	    ;;
+    esac
+done
 
 bash "$DIR/scripts/link.sh" "$DIR"
