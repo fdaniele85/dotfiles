@@ -10,10 +10,11 @@ then
     mkdir "$DIR/backups"
 fi
 
+# Install programs
 for file in $DIR/scripts/installers/*.sh
 do
     name=$(basename $file | sed 's/\.sh//')
-    read -p "Do you wish to install $name? " yn
+    read -p "Do you wish to install '$name'? [y/n] " yn
     case $yn in
         [Yy]* )
 	    bash "$file" "$DIR/backups"
