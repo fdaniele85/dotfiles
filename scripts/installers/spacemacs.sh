@@ -2,6 +2,10 @@
 
 back_dir=$1
 
-cp -r ~/.emacs.d "$bask_dir/emacs.d.bak"
+if [[ ! -d "$back_dir/emacs.d.bak" ]]
+then
+    mkdir "$back_dir/emacs.d.bak"
+    mv ~/.emacs.d "$back_dir/emacs.d.bak"
 
-git clone https://github.com/syl20bnr/spacemacs ~/.emacs.d
+    git clone https://github.com/syl20bnr/spacemacs ~/.emacs.d
+fi
