@@ -1,0 +1,7 @@
+[user]
+	name = Daniele Ferone
+	email = daniele.ferone@unina.it
+[core]
+	excludesfile = /home/daniele/.gitignore_global
+[push]
+	default = matching
