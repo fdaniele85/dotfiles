@@ -1,5 +1,7 @@
 #! /bin/bash
 
+sudo apt-get install emacs
+
 back_dir=$1
 
 if [[ ! -d "$back_dir/emacs.d.bak" ]]
