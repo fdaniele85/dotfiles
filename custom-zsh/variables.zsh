@@ -8,4 +8,6 @@ then
     . $SSJHOME/Ssj.sh
 fi
 
-export UPDATE_DOTFILES_DAYS=2
+export UPDATE_DOTFILES_DAYS=15
+
+#export PATH=/usr/local/texlive/2016/bin/x86_64-linux:$PATH

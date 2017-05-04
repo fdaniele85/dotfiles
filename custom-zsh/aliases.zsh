@@ -13,6 +13,6 @@ alias ls='ls -hF --color' # add colors for filetype recognition
 alias scope="ssh dferone@ui.scope.unina.it"
 alias n="nautilus . &"
 alias t="thunar . &"
-alias rimuoviLog="rm -fr $HOME/Dropbox/linux_files/logs/*"
+alias rimuoviLog="find $HOME/Dropbox/linux_files/logs/ -mtime +5 -exec rm -f {} \;"
 alias "cs=xclip -selection clipboard"
 alias "vs=xclip -o -selection clipboard"
