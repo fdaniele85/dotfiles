@@ -53,7 +53,7 @@ plugins=(git git-flow wd)
 
 # User configuration
 
-  export PATH=".:/home/daniele/Dropbox/linux_files/scripts:/opt/ibm/ILOG/CPLEX_Studio1251/cplex/bin/x86-64_sles10_4.1:/opt/mendeley/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games"
+export PATH=".:/home/daniele/Dropbox/linux_files/scripts:$PATH"
 # export MANPATH="/usr/local/man:$MANPATH"
 
 source $ZSH/oh-my-zsh.sh

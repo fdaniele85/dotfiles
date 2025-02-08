@@ -10,7 +10,6 @@ alias h='history'
 #alias ..='cd ..'
 alias la='ls -Al' # show hidden files
 alias ls='ls -hFN --color' # add colors for filetype recognition
-alias scope="ssh dferone@ui.scope.unina.it"
 alias n="nautilus . &"
 alias xd="xdg-open ."
 alias rimuoviLog="find $HOME/Dropbox/linux_files/logs/ -mtime +5 -exec rm -f {} \;"
