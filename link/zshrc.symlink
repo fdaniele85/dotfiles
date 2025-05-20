@@ -53,7 +53,7 @@ plugins=(git git-flow wd)
 
 # User configuration
 
-export PATH=".:/home/daniele/Dropbox/linux_files/scripts:$PATH"
+export PATH=".:/home/daniele/Sync/scripts:$PATH"
 # export MANPATH="/usr/local/man:$MANPATH"
 
 source $ZSH/oh-my-zsh.sh
