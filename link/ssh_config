@@ -1,0 +1,36 @@
+Host scope
+	User dferone
+	HostName ui.scope.unina.it
+	HostKeyAlgorithms=+ssh-rsa
+	IdentityFile /home/daniele/.ssh/scope/id_rsa
+	PubkeyAcceptedKeyTypes=+ssh-rsa
+
+Host ibis
+	User dferone
+	HostName ibiscohpc-ui.scope.unina.it
+	IdentityFile /home/daniele/.ssh/scope/id_rsa
+    
+Host studio
+	User daniele
+	#HostName 192.167.11.74
+	HostName danieleferone-himalayas.nord
+	Port 22
+	IdentityFile /home/daniele/.ssh/studio/id_rsa
+
+Host vaio
+	User daniele
+#	HostName 192.168.1.13
+	IdentityFile /home/daniele/.ssh/vaio/id
+
+#Host gogs
+#	User git
+#	HostName 192.168.1.13
+#	Port 10022
+#	IdentityFile /home/daniele/.ssh/vaio/id
+
+
+Host fisso
+	User daniele
+#	HostName 192.168.1.16
+#	Port 22
+	IdentityFile /home/daniele/.ssh/vaio/id
