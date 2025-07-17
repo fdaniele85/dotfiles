@@ -12,14 +12,14 @@ Host ibis
     
 Host studio
 	User daniele
-	#HostName 192.167.11.74
-	HostName danieleferone-himalayas.nord
+	HostName 192.167.11.74
+	#HostName danieleferone-himalayas.nord
 	Port 22
 	IdentityFile /home/daniele/.ssh/studio/id_rsa
 
 Host vaio
 	User daniele
-#	HostName 192.168.1.13
+	HostName 192.168.1.13
 	IdentityFile /home/daniele/.ssh/vaio/id
 
 #Host gogs

@@ -83,4 +83,6 @@ source $ZSH/oh-my-zsh.sh
 # alias zshconfig="mate ~/.zshrc"
 # alias ohmyzsh="mate ~/.oh-my-zsh"
 
+compdef fetch-dir=scp
+
 /bin/zsh $HOME/.dotfiles/scripts/check_for_update.sh
