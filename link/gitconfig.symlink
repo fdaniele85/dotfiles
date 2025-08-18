@@ -3,6 +3,7 @@
   email = daniele.ferone@unina.it
 [core]
   excludesfile = ~/.gitignore_global
+	autocrlf = input
 [apply]
   whitespace = fix
 #[alias]
