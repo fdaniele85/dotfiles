@@ -1,0 +1,11 @@
+[Unit]
+Description=Automount NFS HP:/home/daniele
+After=network-online.target
+Wants=network-online.target
+
+[Automount]
+Where=/media/hp
+TimeoutIdleSec=600
+
+[Install]
+WantedBy=multi-user.target

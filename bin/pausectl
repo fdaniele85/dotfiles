@@ -1,0 +1,168 @@
+#!/usr/bin/env bash
+# pausectl — pausa/resume/run con status
+# Bash-only, nessuna dipendenza da XDG_RUNTIME_DIR. Usa ~/.local/pause
+# Comandi:
+#   pausectl pause  <NAME>
+#   pausectl resume <NAME>
+#   pausectl status [NAME]
+#   pausectl run    <NAME> [--mode skip|wait] [--timeout SECS] [--poll SECS] -- cmd [args...]
+
+set -euo pipefail
+
+BASE_DIR="${HOME}/.local/pause"
+LOG_FILE="${LOG_FILE:-/dev/null}"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  pausectl pause   <PAUSE_NAME>
+  pausectl resume  <PAUSE_NAME>
+  pausectl status  [PAUSE_NAME]
+  pausectl run     <PAUSE_NAME> [--mode skip|wait] [--timeout SECS] [--poll SECS] -- command [args...]
+
+Options for 'run':
+  --mode skip|wait     Default: ${PAUSE_MODE:-skip}
+  --timeout SECS       Default: ${WAIT_TIMEOUT:-0}   (0 = infinito in wait)
+  --poll SECS          Default: ${WAIT_POLL:-5}
+
+Env:
+  LOG_FILE=/path/to/log   (default: /dev/null)
+
+Exit codes:
+  status <NAME> → 0 se in pausa, 1 se non in pausa
+  run --mode skip → se in pausa salta ed esce 0 (compatibile con guard)
+  run --mode wait → attende fine pausa; se scade timeout, salta ed esce 0
+EOF
+}
+
+log() {
+  printf '%s [%s] %s\n' "$(date '+%F %T')" "pausectl" "$*" >>"$LOG_FILE" 2>/dev/null || true
+}
+
+ensure_dir() {
+  mkdir -p "$BASE_DIR"
+  chmod 700 "$BASE_DIR" || true
+}
+
+cmd="${1:-}"
+if [[ -z "$cmd" || "$cmd" == "-h" || "$cmd" == "--help" || "$cmd" == "help" ]]; then
+  usage; exit 0
+fi
+shift
+
+case "$cmd" in
+  pause)
+    name="${1:-}"; [[ -n "$name" ]] || { echo "pause: manca PAUSE_NAME" >&2; exit 64; }
+    ensure_dir
+    : > "${BASE_DIR}/${name}"
+    log "pause set: ${BASE_DIR}/${name}"
+    ;;
+
+  resume)
+    name="${1:-}"; [[ -n "$name" ]] || { echo "resume: manca PAUSE_NAME" >&2; exit 64; }
+    ensure_dir
+    if [[ -e "${BASE_DIR}/${name}" ]]; then
+      rm -f "${BASE_DIR}/${name}"
+      log "pause cleared: ${BASE_DIR}/${name}"
+    else
+      log "resume: nothing to clear for '${name}'"
+    fi
+    ;;
+
+  status)
+    ensure_dir
+    if [[ -n "${1:-}" ]]; then
+      name="$1"
+      if [[ -e "${BASE_DIR}/${name}" ]]; then
+        echo "paused: ${BASE_DIR}/${name}"
+        exit 0
+      else
+        echo "clear: ${BASE_DIR}/${name}"
+        exit 1
+      fi
+    else
+      echo "Pause directory: ${BASE_DIR}"
+      shopt -s nullglob
+      files=("${BASE_DIR}"/*)
+      if (( ${#files[@]} )); then
+        echo "Active pause files:"
+        # elenco con timestamp mtime
+        /bin/ls -l --time-style='+%F %T' "${BASE_DIR}"/* | awk '{print $6" "$7" "$9}'
+      else
+        echo "(no active pauses)"
+      fi
+    fi
+    ;;
+
+  run)
+    name="${1:-}"; [[ -n "$name" ]] || { echo "run: manca PAUSE_NAME" >&2; exit 64; }
+    shift || true
+    MODE="${PAUSE_MODE:-skip}"
+    POLL="${WAIT_POLL:-5}"
+    TIMEOUT="${WAIT_TIMEOUT:-0}"
+
+    # parse opzioni fino a "--"
+    while (( $# )); do
+      case "$1" in
+        --mode)     MODE="${2:-}"; shift 2 || true ;;
+        --timeout)  TIMEOUT="${2:-}"; shift 2 || true ;;
+        --poll)     POLL="${2:-}"; shift 2 || true ;;
+        --) shift; break ;;
+        -h|--help) usage; exit 0 ;;
+        *) echo "run: opzione sconosciuta '$1'" >&2; usage; exit 64 ;;
+      esac
+    done
+    (( $# )) || { echo "run: manca il comando dopo '--'" >&2; exit 64; }
+
+    ensure_dir
+    pausefile="${BASE_DIR}/${name}"
+
+    if [[ "$MODE" == "skip" ]]; then
+      if [[ -e "$pausefile" ]]; then
+        log "skip: paused by '$pausefile'"
+        exit 0
+      fi
+      exec "$@"
+    elif [[ "$MODE" == "wait" ]]; then
+      if [[ ! -e "$pausefile" ]]; then
+        exec "$@"
+      fi
+      start="$(date +%s)"
+      if command -v inotifywait >/dev/null 2>&1; then
+        # osserva la directory; al cambio ricontrolla
+        while [[ -e "$pausefile" ]]; do
+          inotifywait -q -e delete -e move -e attrib -e close_write "$(dirname "$pausefile")" >/dev/null 2>&1 || true
+          if (( TIMEOUT > 0 )); then
+            now="$(date +%s)"
+            if (( now - start >= TIMEOUT )); then
+              log "skip: timeout ${TIMEOUT}s while paused by '$pausefile'"
+              exit 0
+            fi
+          fi
+        done
+      else
+        # polling
+        while [[ -e "$pausefile" ]]; do
+          sleep "$POLL"
+          if (( TIMEOUT > 0 )); then
+            now="$(date +%s)"
+            if (( now - start >= TIMEOUT )); then
+              log "skip: timeout ${TIMEOUT}s while paused by '$pausefile'"
+              exit 0
+            fi
+          fi
+        done
+      fi
+      exec "$@"
+    else
+      echo "run: --mode deve essere 'skip' o 'wait' (dato: '$MODE')" >&2
+      exit 64
+    fi
+    ;;
+
+  *)
+    echo "Comando sconosciuto: $cmd" >&2
+    usage
+    exit 64
+    ;;
+esac

@@ -1,0 +1,14 @@
+[Unit]
+Description=OpenFortiVPN client
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/openfortivpn -c /home/daniele/.config/openfortivpn/config
+ExecStop=/bin/kill $MAINPID
+ExecStartPost=/bin/sh -c 'sleep 15; ping -c1 -W1 dferone.dma.unina.it && exit 0; exit 1'
+Restart=on-abort
+User=root
+
+[Install]
+WantedBy=multi-user.target

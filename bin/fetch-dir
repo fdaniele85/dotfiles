@@ -1,0 +1,133 @@
+#!/usr/bin/env zsh
+# fetch-dir 2-way: scarica DA server o carica VERSO server usando tar.gz temporanei
+# Uso:
+#   fetch-dir SRC DEST
+#   - Esattamente come scp: una delle due vie deve essere host:/percorso
+#     * SRC remoto  & DEST locale  => download
+#     * SRC locale  & DEST remoto  => upload
+#   Esempi:
+#     fetch-dir server:/data/progetti .
+#     fetch-dir ./build server:/var/www/html
+#
+# Requisiti: ssh, scp, tar sia localmente che sul server. fzf non necessario.
+
+set -euo pipefail
+
+# ---------- Colori ----------
+RED=$'\033[31m'
+GREEN=$'\033[32m'
+YELLOW=$'\033[33m'
+RESET=$'\033[0m'
+
+# ---------- Funzioni utili ----------
+usage() {
+  echo "${RED}Uso: $0 SRC DEST${RESET}\n  (una delle due parti deve essere del tipo host:/percorso)" >&2
+  exit 1
+}
+
+is_remote() { [[ $1 == *:* ]]; }
+
+# Estrae host e path da "host:/percorso"
+parse_remote() {
+  local spec=$1
+  REMOTE_HOST=${spec%%:*}
+  REMOTE_PATH=${spec#*:}
+}
+
+# Cleanup automatico su EXIT
+cleanup() {
+  # locale
+  [[ -n ${LOCAL_TAR:-} && -f $LOCAL_TAR ]] && rm -f -- "$LOCAL_TAR"
+  # remoto
+  if [[ -n ${REMOTE_TAR:-} && -n ${REMOTE_HOST:-} ]]; then
+    ssh "${SSH_OPTS[@]}" "$REMOTE_HOST" "rm -f '$REMOTE_TAR'" 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT
+
+# ---------- Controllo argomenti ----------
+(( $# == 2 )) || usage
+SRC=$1
+DST=$2
+
+# Determina direzione
+if is_remote "$SRC" && ! is_remote "$DST"; then
+  DIRECTION=download
+elif ! is_remote "$SRC" && is_remote "$DST"; then
+  DIRECTION=upload
+else
+  echo "${RED}Errore: specifica una sola parte remota (come scp).${RESET}" >&2
+  usage
+fi
+
+# Opzioni SSH per silenziare banner/MOTD
+SSH_OPTS=(-q -o LogLevel=ERROR)
+
+# Timestamp per file temporanei
+TS=$(date +%s)
+
+case $DIRECTION in
+  download)
+    # SRC: remoto, DST: locale (directory di estrazione)
+    parse_remote "$SRC"          # -> REMOTE_HOST, REMOTE_PATH
+    LOCAL_DIR=$DST
+
+    echo "${YELLOW}→ Verifico che '$REMOTE_PATH' esista su $REMOTE_HOST...${RESET}"
+    ssh "${SSH_OPTS[@]}" "$REMOTE_HOST" "test -d '$REMOTE_PATH'" \
+      || { echo "${RED}❌ Errore: '$REMOTE_PATH' non è una directory su $REMOTE_HOST${RESET}"; exit 1; }
+
+    BASENAME=$(basename -- "$REMOTE_PATH")
+    PARENT_DIR=$(dirname  -- "$REMOTE_PATH")
+    REMOTE_TAR="/tmp/${BASENAME}_${TS}.tar.gz"
+    LOCAL_TAR="${BASENAME}_${TS}.tar.gz"
+
+    echo "${YELLOW}→ Compressione remota: creo '$REMOTE_TAR' con lista file${RESET}"
+    ssh "${SSH_OPTS[@]}" "$REMOTE_HOST" \
+      "tar czvf '$REMOTE_TAR' -C '$PARENT_DIR' '$BASENAME'" \
+      || { echo "${RED}❌ Errore durante la creazione del tar remoto${RESET}"; exit 1; }
+
+    echo "${YELLOW}→ Download dell’archivio in './$LOCAL_TAR'${RESET}"
+    scp -o LogLevel=ERROR "$REMOTE_HOST:$REMOTE_TAR" "./$LOCAL_TAR" \
+      || { echo "${RED}❌ Errore durante lo scaricamento${RESET}"; exit 1; }
+
+    echo "${YELLOW}→ Estrazione locale in '$LOCAL_DIR'${RESET}"
+    mkdir -p -- "$LOCAL_DIR"
+    tar xzvf "$LOCAL_TAR" -C "$LOCAL_DIR" \
+      || { echo "${RED}❌ Errore durante l’estrazione${RESET}"; exit 1; }
+
+    ;;
+
+  upload)
+    # SRC: locale, DST: remoto
+    parse_remote "$DST"          # -> REMOTE_HOST, REMOTE_PATH (destinazione)
+    LOCAL_SRC=$SRC
+
+    echo "${YELLOW}→ Verifico che la directory locale '$LOCAL_SRC' esista...${RESET}"
+    [[ -d $LOCAL_SRC ]] || { echo "${RED}❌ Errore: '$LOCAL_SRC' non è una directory locale${RESET}"; exit 1; }
+
+    echo "${YELLOW}→ Creo destinazione remota (se mancante): '$REMOTE_PATH' su $REMOTE_HOST${RESET}"
+    ssh "${SSH_OPTS[@]}" "$REMOTE_HOST" "mkdir -p '$REMOTE_PATH'" \
+      || { echo "${RED}❌ Impossibile creare '$REMOTE_PATH' su $REMOTE_HOST${RESET}"; exit 1; }
+
+    BASENAME=$(basename -- "$LOCAL_SRC")
+    LOCAL_PARENT=$(dirname -- "$LOCAL_SRC")
+    LOCAL_TAR="${BASENAME}_${TS}.tar.gz"
+    REMOTE_TAR="/tmp/${BASENAME}_${TS}.tar.gz"
+
+    echo "${YELLOW}→ Compressione locale: creo '$LOCAL_TAR' con lista file${RESET}"
+    tar czvf "$LOCAL_TAR" -C "$LOCAL_PARENT" "$BASENAME" \
+      || { echo "${RED}❌ Errore nella creazione del tar locale${RESET}"; exit 1; }
+
+    echo "${YELLOW}→ Upload dell’archivio su $REMOTE_HOST:$REMOTE_TAR${RESET}"
+    scp -o LogLevel=ERROR "$LOCAL_TAR" "$REMOTE_HOST:$REMOTE_TAR" \
+      || { echo "${RED}❌ Errore durante l’upload${RESET}"; exit 1; }
+
+    echo "${YELLOW}→ Estrazione remota in '$REMOTE_PATH'${RESET}"
+    ssh "${SSH_OPTS[@]}" "$REMOTE_HOST" \
+      "tar xzvf '$REMOTE_TAR' -C '$REMOTE_PATH'" \
+      || { echo "${RED}❌ Errore durante l’estrazione remota${RESET}"; exit 1; }
+    ;;
+
+esac
+
+echo "${GREEN}✅ Operazione completata ($DIRECTION).${RESET}"

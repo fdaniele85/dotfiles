@@ -10,9 +10,6 @@ fi
 
 export UPDATE_DOTFILES_DAYS=15
 
-if [[ -d "$HOME/scripts" ]]
-then
-    export PATH="$PATH:$HOME/scripts"
-fi
-
 #export PATH=/usr/local/texlive/2016/bin/x86_64-linux:$PATH
+
+export PATH=".:/home/daniele/.dotfiles/bin:$PATH"

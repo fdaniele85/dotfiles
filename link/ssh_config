@@ -31,6 +31,10 @@ Host vaio
 
 Host fisso
 	User daniele
-#	HostName 192.168.1.16
+	HostName 192.168.1.16
 #	Port 22
 	IdentityFile /home/daniele/.ssh/vaio/id
+
+Host dell
+	User daniele
+	HostName 192.168.1.25

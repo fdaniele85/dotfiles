@@ -1,0 +1,25 @@
+[Unit]
+Description=OpenFortiVPN client (ready when log message appears)
+After=network.target
+
+[Service]
+Type=notify
+NotifyAccess=all
+Environment="READY_REGEX=Tunnel is up and running"
+
+StandardOutput=journal
+StandardError=journal
+
+ExecStart=/bin/sh -eu -c "/usr/bin/stdbuf -oL /usr/bin/openfortivpn -c /home/daniele/.config/openfortivpn/config 2>&1 \
+ | /usr/bin/stdbuf -oL /usr/bin/awk -v pat=\"$READY_REGEX\" '\
+$0 ~ pat && !ready { system(\"/usr/bin/systemd-notify --ready\"); ready=1 } \
+{ print; fflush() }'"
+
+TimeoutStartSec=30s
+Restart=on-failure
+RestartSec=5s
+KillMode=control-group
+User=root
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,6 @@
+# src    Dest    Owner   Group   Mode   Validate                          WhenHost        Tags
+files/etc/sudoers.d/vpn	/etc/sudoers.d/vpn	root	root	0440	visudo -c -f {TARGET}	*	-
+files/etc/systemd/system/vpn.service	/etc/systemd/system/vpn.service	root	root	0644	-	*	-
+files/etc/auto.nfs	/etc/auto.nfs	root	root	0644	-	*	-
+files/etc/auto.master.d/nfs.autofs	/etc/auto.master.d/nfs.autofs	root	root	0644	-	*	-
+files/config/user-tmpfiles.d/pause.conf	/home/daniele/.config/user-tmpfiles.d/pause.config	daniele	daniele	0644	-	*	user

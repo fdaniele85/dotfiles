@@ -1,0 +1,1 @@
+daniele ALL=(root) NOPASSWD: /bin/systemctl start vpn.service, /bin/systemctl status vpn.service, /bin/systemctl stop vpn.service
