@@ -1,0 +1,3 @@
+#!/bin/sh
+# Se già usi ~/.passphrase con PASSPHRASE=...
+printf '%s' "SjO2fouHbK9FbyOOJw1Q"
