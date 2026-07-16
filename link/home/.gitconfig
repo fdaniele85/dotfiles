@@ -1,6 +1,6 @@
 [user]
-  name = Daniele Ferone
-  email = daniele.ferone@unina.it
+	name = Daniele Ferone
+	email = daniele.ferone@unina.it
 [core]
   excludesfile = ~/.gitignore_global
 	autocrlf = input
@@ -56,3 +56,5 @@
   insteadOf = "gist:"
 [push]
 	default = matching
+[init]
+	defaultBranch = main

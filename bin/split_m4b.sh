@@ -16,7 +16,7 @@ echo $file
 
 chap="${file:r}.chapters.txt"
 if [[ -z "$cue" ]]; then
-	php $HOME/Sync/scripts/m4b-tool-nuovo.phar meta "$file" --export-chapters
+	php $HOME/.dotfiles/bin/m4b-tool-nuovo.phar meta "$file" --export-chapters
 	grep -v "^#" "$chap" | sponge "$chap"
 else
 	cue_file="${file:r}.cue"
@@ -29,4 +29,4 @@ else
 		((i++))
 	done > $chap
 fi
-php $HOME/Sync/scripts/m4b-tool.phar split --audio-format mp3 --audio-bitrate 256k --audio-channels 2 --audio-samplerate 44100 "$file"
+php $HOME/.dotfiles/bin/m4b-tool.phar split --audio-format mp3 --audio-bitrate 256k --audio-channels 2 --audio-samplerate 44100 "$file"

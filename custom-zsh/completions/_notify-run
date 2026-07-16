@@ -1,0 +1,29 @@
+#compdef notify-run.sh notify-run
+
+_notify_run() {
+    local curcontext="$curcontext" state line ret=1
+
+    _arguments -C \
+        '(-l --label)'{-l,--label}'[etichetta per le notifiche]:etichetta: ' \
+        '(- *)-h[mostra aiuto]' \
+        '(-)--[fine opzioni di notify-run]' \
+        '*::comando:->comando' \
+        && ret=0
+
+    case $state in
+        comando)
+            # se è rimasto il separatore "--", scartalo prima di delegare
+            if [[ ${line[1]} == '--' ]]; then
+                shift 1 line
+            fi
+            words=( ${line} )
+            CURRENT=${#words}
+            _normal
+            ret=$?
+            ;;
+    esac
+
+    return ret
+}
+
+_notify_run "$@"

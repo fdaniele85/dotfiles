@@ -1,0 +1,239 @@
+.TH ANALIZZA.PY 1 "Luglio 2026" "analizza.py 1.0" "Comandi Utente"
+.SH NOME
+analizza.py \- estrae valori da file JSON (RIS) via objectpath, li aggrega e produce CSV o Excel
+.SH SINTASSI
+.B analizza.py
+[\fIOPZIONI\fR] \fIDIRECTORY\fR...
+.PP
+.B analizza.py
+\fB\-\-onlyOne\fR \fIDIRECTORY\fR...
+.PP
+.B analizza.py
+\fB\-\-best\-by\fR \fIESPR\fR \fB\-\-solution\fR \fIESPR\fR [\fB\-\-max\fR] [\fB\-o\fR \fIFILE.csv\fR] \fIDIRECTORY\fR...
+.SH DESCRIZIONE
+.B analizza.py
+scansiona una o più directory alla ricerca di file
+.I *.ris
+(risultati in formato JSON), estrae valori tramite espressioni
+.BR objectpath (7)
+e li aggrega con
+.BR pandas .
+Ogni directory di input rappresenta un "algoritmo" (o variante) distinto; il nome dell'istanza
+viene derivato dal nome del file tramite l'opzione
+.BR \-\-type .
+.PP
+Lo script supporta tre modalità operative, fra loro incompatibili:
+.TP
+.B Modalità aggregazione (default)
+Richiede
+.B \-\-arguments
+e almeno una fra
+.BR \-\-mean ", " \-\-median ", " \-\-stddev ", " \-\-min ", " \-\-max ", " \-\-count .
+Produce una tabella con una riga per istanza e colonne per algoritmo/argomento/metrica.
+.TP
+.BR \-\-onlyOne
+Stampa a video il contenuto (formattato) di un singolo file JSON scelto a caso fra tutti quelli trovati, utile per ispezionare rapidamente la struttura dei dati.
+.TP
+.BR \-\-best\-by " " \fIESPR\fR
+Per ogni istanza, seleziona la run con il valore minimo (o massimo, con
+.BR \-\-max )
+di
+.IR ESPR ,
+e stampa istanza, valore e soluzione associata
+.RB ( \-\-solution ).
+Incompatibile con le opzioni della modalità aggregazione.
+.SH OPZIONI
+.SS Selezione ed estrazione dei dati
+.TP
+.BI \-\-arguments " ESPR..."
+Una o più espressioni objectpath (relative alla radice, senza il prefisso
+.BR $. )
+da estrarre come valori numerici. Suffissa un'espressione con
+.B "| length"
+per usarne la lunghezza dell'array invece del valore.
+.TP
+.BI \-\-column\-names " NOME..."
+Nomi da usare per le colonne corrispondenti a
+.BR \-\-arguments ", nello stesso ordine."
+.TP
+.BI \-\-check " ESPR"
+Scarta il file se
+.I ESPR
+(objectpath) risulta falso.
+.TP
+.BI \-\-size " ESPR"
+Scarta il file se l'array risultante da
+.I ESPR
+ha lunghezza zero.
+.TP
+.BI \-\-first " ARG N [min|max]"
+Per ogni coppia algoritmo/istanza, mantiene solo le
+.I N
+run con il valore più basso (default) o più alto di
+.I ARG
+(objectpath).
+.SS Filtro sul nome dell'istanza
+.TP
+.BI \-\-type " REGEX"
+Espressione regolare applicata al nome del file per derivare il nome dell'istanza (default:
+.IR _\ed+\e.ris$ ).
+.TP
+.BI \-\-replace " STRINGA"
+Stringa di sostituzione usata insieme a
+.BR \-\-type " (default: stringa vuota)."
+.TP
+.BI \-g\fR,\ \-\-grep " REGEX"
+Filtra le istanze il cui nome soddisfa
+.IR REGEX .
+.TP
+.B \-v
+Inverte il filtro di
+.BR \-\-grep .
+.TP
+.B \-\-empty
+Include nell'output anche le istanze con valori mancanti per qualche algoritmo. Incompatibile con
+.BR \-\-complete .
+.TP
+.B \-\-complete
+Include solo le istanze che hanno valori per tutti gli algoritmi. Incompatibile con
+.BR \-\-empty .
+.SS Metriche di aggregazione
+.TP
+.B \-\-mean
+Media.
+.TP
+.B \-\-median
+Mediana.
+.TP
+.B \-\-stddev
+Deviazione standard.
+.TP
+.B \-\-min
+Minimo.
+.TP
+.B \-\-max
+Massimo. Con
+.BR \-\-best\-by ,
+cambia il criterio di selezione da minimo a massimo.
+.TP
+.B \-\-count
+Numero di run considerate.
+.TP
+.B \-\-columnMean
+Aggiunge in fondo alla tabella una riga con la media di ogni colonna.
+.TP
+.B \-\-gap
+Aggiunge una riga con lo scostamento percentuale rispetto al primo blocco di colonne (implica
+.BR \-\-columnMean ).
+.SS Etichette e formattazione
+.TP
+.BI \-n\fR,\ \-\-names " NOME..."
+Nomi da visualizzare per ciascuna directory di input, nello stesso ordine degli argomenti posizionali.
+.TP
+.B \-\-full
+Nelle intestazioni di colonna usa il formato
+.IR algoritmo.argomento
+invece del solo nome dell'argomento.
+.TP
+.BI \-\-digits " N"
+Numero di cifre decimali nell'output (default: 2).
+.TP
+.B \-\-silent
+Non stampa su stderr il percorso di ogni file processato (per default viene mostrata anche una barra di avanzamento).
+.SS Output
+.TP
+.BI \-o\fR,\ \-\-out " FILE " [ SHEET ]
+Percorso di output.
+.RS
+.IP \(bu 2
+Senza
+.BR \-\-best\-by :
+richiede un file
+.B .xlsx
+o
+.BR .xls ,
+con nome di foglio opzionale. Se il foglio esiste già in un file
+.B .xlsx
+esistente viene sostituito; il formato
+.B .xls
+non supporta l'aggiunta di fogli.
+.IP \(bu 2
+Con
+.BR \-\-best\-by :
+richiede esattamente un percorso
+.B .csv
+.RE
+.IP
+Se omesso, l'output va su stdout in formato CSV.
+.TP
+.BI \-\-to\-parquet " FILE"
+Salva i record grezzi estratti (prima dell'aggregazione) in formato Parquet.
+.SH ESEMPI
+Tabella con media e deviazione standard di due argomenti, confrontando due algoritmi:
+.PP
+.RS
+.nf
+analizza.py --arguments 'cost' 'time' --mean --stddev \e
+            -n GRASP-nodes GRASP-paths \e
+            risultati/nodes risultati/paths
+.fi
+.RE
+.PP
+Solo istanze completate da tutti gli algoritmi, con riga di medie e gap, su Excel:
+.PP
+.RS
+.nf
+analizza.py --arguments 'cost' --mean --complete --columnMean --gap \e
+            -o confronto.xlsx Foglio1 \e
+            risultati/nodes risultati/paths
+.fi
+.RE
+.PP
+Ispezione rapida della struttura di un file JSON:
+.PP
+.RS
+.nf
+analizza.py --onlyOne risultati/nodes
+.fi
+.RE
+.PP
+Miglior soluzione per istanza, per costo minimo:
+.PP
+.RS
+.nf
+analizza.py --best-by 'cost' --solution 'route' \e
+            -o migliori.csv risultati/nodes
+.fi
+.RE
+.SH VALORI DI USCITA
+.TP
+.B 0
+Esecuzione completata con successo.
+.TP
+.B 1
+Errore: argomenti non validi, nessuna directory di input valida, nessun record estratto, o errore nel salvataggio del file di output.
+.SH NOTE
+.IP \(bu 2
+Le opzioni
+.BR \-\-best\-by " e " \-\-solution
+sono incompatibili con le opzioni della modalità di aggregazione standard (
+.BR \-\-arguments ", " \-\-mean ", " \-\-median ", " \-\-stddev ", " \-\-count ", " \-\-min ", " \-\-first ", " \-\-columnMean ", " \-\-gap ", " \-\-column\-names ", " \-\-full ", " \-\-empty ", " \-\-complete )
+a meno di usare anche
+.BR \-\-onlyOne .
+.IP \(bu 2
+Richiede il pacchetto Python
+.B pandas
+(oltre a objectpath, numpy, natsort, tqdm); per l'output
+.B .xlsx
+richiede inoltre
+.B xlsxwriter
+o
+.BR openpyxl ,
+per
+.B .xls
+richiede
+.BR xlwt .
+.SH VEDI ANCHE
+.BR python3 (1)
+.SH AUTORE
+Daniele

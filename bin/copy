@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# copy - reads stdin and copies using xclip if possible
+# fallback: write atomically to $HOME/.local/share/clipboard/text
+
+
+set -euo pipefail
+
+
+# Temporary file to collect stdin
+TMP=$(mktemp)
+trap 'rm -f "$TMP"' EXIT
+cat - | sed -z 's/\n$//' > "$TMP"
+cat "$TMP"
+
+
+# If xclip exists, try to use it
+if command -v xclip >/dev/null 2>&1; then
+# Try to send to the X clipboard; silent on success/failure
+if xclip -selection clipboard < "$TMP" 2>/dev/null; then
+rm -f "$TMP"
+exit 0
+fi
+fi
+
+
+# Fallback: ensure directory exists and move file atomically
+CLIPDIR="$HOME/.local/share/clipboard"
+mkdir -p "$CLIPDIR"
+mv "$TMP" "$CLIPDIR/text"
+# cancel trap (we intentionally keep the file)
+trap - EXIT
+exit 0

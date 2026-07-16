@@ -1,5 +1,4 @@
-#! /bin/zsh
-
+#!/bin/zsh
 convertsecs() {
  ((h=${1}/3600))
  ((m=(${1}%3600)/60))
@@ -7,31 +6,64 @@ convertsecs() {
  printf "%02d:%02d:%02d\n" $h $m $s
 }
 
+SELF=$$
+SCRIPT_NAME="${0:t}"
+SLEEP_SECONDS=30
+
+matching_pids() {
+	local pattern="$1"
+	local pid
+	local comm
+	local args
+
+	for pid in ${(f)"$(pgrep -f -- "$pattern")"}; do
+		[[ -z "$pid" || "$pid" = "$SELF" ]] && continue
+		comm=$(ps -p "$pid" -o comm= 2>/dev/null) || continue
+		args=$(ps -p "$pid" -o args= 2>/dev/null) || continue
+		[[ "$comm" = "pgrep" ]] && continue
+		[[ "$args" == *"$SCRIPT_NAME"* ]] && continue
+		print "$pid $args"
+	done
+}
+
+while getopts "s:" opt; do
+	case "$opt" in
+		s)
+			SLEEP_SECONDS="$OPTARG"
+			;;
+		*)
+			echo "Uso: $0 [-s secondi] comando"
+			exit 1
+			;;
+	esac
+done
+
+shift $((OPTIND - 1))
+
 if [[ -z "$1" ]]; then
 	echo "Necessario comando"
 	exit 1
 fi
 
-if [[ -z "$(pgrep -- $1)" ]]; then
+if ! [[ "$SLEEP_SECONDS" =~ '^[0-9]+$' ]] || (( SLEEP_SECONDS <= 0 )); then
+	echo "Valore -s non valido: $SLEEP_SECONDS"
+	exit 1
+fi
+
+if [[ -z "$(matching_pids "$1")" ]]; then
 	echo "Il comando non sta girando"
 	exit 2
 fi
 
-user_id=$(id -u)
-if ((user_id != 0)); then
-	echo "Bisogna eseguirlo come amministratore"
-	exit 3
-fi
-
 inizio=$(date +%s)
-#clear
-i=0
-while [[ ! -z "$(pgrep -- $1)" ]]; do
+while true; do
+	pids="$(matching_pids "$1")"
+	[[ -z "$pids" ]] && break
 	ora=$(date +%s)
 	secondi=$((ora-inizio))
-
-	echo -n "\rAspetto la fine di $1 da $(convertsecs $secondi)"
-	sleep 30
-	((i++))
+	print -n "\rAspetto la fine di $1 da $(convertsecs $secondi)"
+	sleep "$SLEEP_SECONDS"
 done
+
+print "\nTerminato, spengo..."
 poweroff

@@ -1,0 +1,167 @@
+#!/usr/bin/env python3
+"""
+tarhop: trasferisce una directory (locale o remota) verso una destinazione
+(locale o remota) impacchettandola con tar (senza compressione) e
+inviandola via pipe, senza mai scrivere file temporanei su disco.
+
+Uso:
+    tarhop SORGENTE DESTINAZIONE
+
+SORGENTE e DESTINAZIONE possono essere:
+    - un percorso locale:      Risultati
+    - un percorso remoto:      ibis:Ponti
+
+La cartella sorgente viene sempre creata come sottocartella dentro la
+destinazione (stesso comportamento di `cp -r sorgente destinazione/`).
+
+Esempio:
+    tarhop Risultati ibis:Ponti/
+    -> crea ~/Ponti/Risultati sul host ibis
+
+Note:
+    - I percorsi remoti relativi (es. "Ponti/") sono relativi alla home
+      dell'utente sul remoto, perche' ssh esegue il comando non interattivo
+      partendo da $HOME. Se serve un percorso assoluto, usalo direttamente
+      (es. "ibis:/data/Ponti"). Evita "~/Ponti" perche' viene passato tra
+      apici singoli e la tilde non verrebbe espansa dalla shell remota.
+"""
+
+import argparse
+import os
+import shlex
+import shutil
+import subprocess
+import sys
+
+
+def parse_spec(spec):
+    """Ritorna (host, path). host e' None se il percorso e' locale."""
+    if ":" in spec and not spec.startswith("/") and not spec.startswith("."):
+        host, path = spec.split(":", 1)
+        if host and path:
+            return host, path
+    return None, spec
+
+
+def split_parent_leaf(path):
+    normalized = path.rstrip("/") or "/"
+    parent, leaf = os.path.split(normalized)
+    if parent == "":
+        parent = "."
+    if leaf == "":
+        sys.exit(f"Percorso sorgente non valido: {path!r}")
+    return parent, leaf
+
+
+def get_size_bytes(host, path):
+    """Stima la dimensione totale (in byte) della sorgente, per dare a `pv`
+    un riferimento e mostrare percentuale/ETA. Ritorna None se non riesce
+    a determinarla (in tal caso pv mostra comunque byte trasferiti e velocita')."""
+    if host is None:
+        cmd = ["du", "-sb", path]
+    else:
+        remote_cmd = f"du -sb {shlex.quote(path)}"
+        cmd = ["ssh", host, remote_cmd]
+    try:
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=30)
+        if result.returncode == 0 and result.stdout.strip():
+            return int(result.stdout.split()[0])
+    except Exception:
+        pass
+    return None
+
+
+def build_source_cmd(host, path, verbose, tar_verbose):
+    parent, leaf = split_parent_leaf(path)
+    tar_flags = "-cvf" if tar_verbose else "-cf"
+    if host is None:
+        cmd = ["tar", tar_flags, "-", "-C", parent, leaf]
+    else:
+        remote_cmd = f"tar {tar_flags} - -C {shlex.quote(parent)} {shlex.quote(leaf)}"
+        cmd = ["ssh", host, remote_cmd]
+    if verbose:
+        print(f"[verbose] source cmd: {cmd}", file=sys.stderr)
+    return cmd
+
+
+def build_dest_cmd(host, path, verbose, tar_verbose):
+    tar_flags = "-xvf" if tar_verbose else "-xf"
+    if host is None:
+        os.makedirs(path, exist_ok=True)
+        cmd = ["tar", tar_flags, "-", "-C", path]
+    else:
+        remote_cmd = f"mkdir -p {shlex.quote(path)} && tar {tar_flags} - -C {shlex.quote(path)}"
+        cmd = ["ssh", host, remote_cmd]
+    if verbose:
+        print(f"[verbose] dest cmd: {cmd}", file=sys.stderr)
+    return cmd
+
+
+def run_transfer(source, dest, verbose=False, show_progress=True):
+    src_host, src_path = parse_spec(source)
+    dst_host, dst_path = parse_spec(dest)
+
+    use_pv = show_progress and shutil.which("pv") is not None
+    # Se non c'e' pv, usiamo tar -v come fallback per avere comunque un
+    # riscontro visivo (elenco dei file via via che vengono processati).
+    tar_verbose = show_progress and not use_pv
+
+    source_cmd = build_source_cmd(src_host, src_path, verbose, tar_verbose)
+    dest_cmd = build_dest_cmd(dst_host, dst_path, verbose, tar_verbose)
+
+    producer = subprocess.Popen(source_cmd, stdout=subprocess.PIPE)
+    pv_proc = None
+
+    if use_pv:
+        size = get_size_bytes(src_host, src_path)
+        pv_cmd = ["pv"]
+        if size:
+            pv_cmd += ["-s", str(size)]
+        if verbose:
+            print(f"[verbose] pv cmd: {pv_cmd} (size={size})", file=sys.stderr)
+        pv_proc = subprocess.Popen(pv_cmd, stdin=producer.stdout, stdout=subprocess.PIPE)
+        producer.stdout.close()
+        consumer = subprocess.Popen(dest_cmd, stdin=pv_proc.stdout, stderr=subprocess.PIPE)
+        pv_proc.stdout.close()
+    else:
+        consumer = subprocess.Popen(dest_cmd, stdin=producer.stdout, stderr=subprocess.PIPE)
+        # Permette al producer di ricevere SIGPIPE se il consumer termina prima
+        producer.stdout.close()
+
+    _, consumer_stderr = consumer.communicate()
+    producer.wait()
+    if pv_proc is not None:
+        pv_proc.wait()
+
+    if producer.returncode != 0:
+        sys.exit(f"Errore nella creazione del tar alla sorgente (returncode={producer.returncode})")
+
+    if pv_proc is not None and pv_proc.returncode != 0:
+        sys.exit(f"Errore in pv (returncode={pv_proc.returncode})")
+
+    if consumer.returncode != 0:
+        stderr_text = consumer_stderr.decode("utf-8", errors="replace").strip()
+        sys.exit(stderr_text or f"Errore nell'estrazione alla destinazione (returncode={consumer.returncode})")
+
+    if verbose:
+        print("[verbose] trasferimento completato", file=sys.stderr)
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Trasferisce una cartella (locale o remota) verso una destinazione (locale o remota) via tar+ssh."
+    )
+    parser.add_argument("source", help="Percorso sorgente: locale oppure host:path")
+    parser.add_argument("dest", help="Percorso destinazione: locale oppure host:path")
+    parser.add_argument("--verbose", action="store_true", help="Stampa i comandi eseguiti e i dettagli di debug")
+    parser.add_argument(
+        "--quiet", action="store_true",
+        help="Disattiva la progress bar / l'elenco file (utile per script non interattivi)"
+    )
+    args = parser.parse_args()
+
+    run_transfer(args.source, args.dest, verbose=args.verbose, show_progress=not args.quiet)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,4 +1,5 @@
 #! /home/daniele/.venvs/scripts_1553aca88f67/bin/python3
+# encoding: utf-8
 
 import os
 import sys
@@ -7,330 +8,832 @@ import json
 import argparse
 import csv
 import objectpath
-import numpy
+import numpy as np
 import random
+import pandas as pd
 from natsort import natsorted, ns
+from tqdm import tqdm
+
+"""
+Script che estrae valori da JSON (objectpath), aggrega con pandas e scrive una tabella CSV.
+- Rimosso il supporto a bigTypes.
+- Usa DataFrame + groupby/agg + unstack (pivot) per calcoli più semplici.
+- Flag --to-parquet per salvare il dataframe raw (records) su disco.
+
+Uso essenziale:
+  script.py --arguments 'field' --mean --median --std <dirs...>
+  script.py --onlyOne <dirs...>
+
+Nota: lo script richiede pandas.
+"""
 
 
-def round_floats(row):
+def round_floats(row, digits):
     rounded_row = []
     for x in row:
-        if isinstance(x, float):
-            # Arrotonda a 2 decimali e formatta come stringa
-            rounded_row.append(f"{x:.2f}")
+        if isinstance(x, float) or isinstance(x, np.floating):
+            rounded_row.append(f"{x:.{digits}f}")
         else:
             rounded_row.append(x)
     return rounded_row
 
 
-parser = argparse.ArgumentParser(description='test')
-parser.add_argument("--empty", help="Print rows with empty values", action="store_true")
-parser.add_argument("--arguments", nargs='+', help="Arguments")
-parser.add_argument("inputs", nargs='+', help="Input files")
-parser.add_argument("-o", "--out", help="Output file")
-parser.add_argument("--type", help="Type regex")
-parser.add_argument("--replace", help="Replace")
-parser.add_argument("-g", "--grep", help="Grep")
-parser.add_argument("-v", help="Grep reverse", action="store_true")
-parser.add_argument("--onlyOne", help="Print only one", action="store_true")
-parser.add_argument("--bigType", help="Big type regex")
-parser.add_argument("--stddev", help="Print std dev", action="store_true")
-parser.add_argument("--median", help="Print median", action="store_true")
-parser.add_argument("--mean", help="Print average", action="store_true")
-parser.add_argument("--min", help="Print min", action="store_true")
-parser.add_argument("--max", help="Print max", action="store_true")
-parser.add_argument("--count", help="Print the count", action="store_true")
-parser.add_argument("-n", "--names", nargs='+', help="Algorithms' names")
-parser.add_argument("--check", help="Feasibility check")
-parser.add_argument("--full", help="Full names", action="store_true")
-parser.add_argument("--size", help="Check if an array has size greater than zero")
+def safe_execute(tree, expr):
+    try:
+        res = tree.execute(expr)
+    except Exception:
+        raise
 
-args = parser.parse_args()
-inputs = [dr for dr in args.inputs if os.path.isdir(dr)]
-empty = args.empty
-out = args.out
-richiesti = args.arguments
-typeRegex = args.type
-replace = args.replace
-grep = args.grep
-onlyOne = args.onlyOne
-bigTypeReg = args.bigType
-stddev = args.stddev
-names = args.names
-check = args.check
-size = args.size
-count = args.count
-full = args.full
+    if res is None:
+        raise ValueError("None result")
 
-if typeRegex is None:
-    typeRegex = "_\\d+\\.ris$"
+    try:
+        if hasattr(res, "__iter__") and not isinstance(res, (str, bytes, dict)):
+            lst = list(res)
+            if len(lst) == 0:
+                raise ValueError("empty")
+            if len(lst) == 1:
+                return lst[0]
+            return lst
+    except TypeError:
+        pass
 
-if replace is None:
-    replace = ""
-
-if bigTypeReg is None:
-	bigTypeReg = ".*"
+    return res
 
 
-v = {}
-bigTypes={}
-types={}
-nomi = {}
+def execute_preserve_shape(tree, expr):
+    res = tree.execute(expr)
+    if res is None:
+        raise ValueError("None result")
 
-if names is None:
-	for dr in inputs:
-		nomi[dr] = re.sub("_v?[0-9.]*$", "", dr)
-else:
-	for i in range(0, len(inputs)):
-		nomi[inputs[i]] = names[i]
+    try:
+        if hasattr(res, "__iter__") and not isinstance(res, (str, bytes, dict, list, tuple)):
+            return list(res)
+    except TypeError:
+        pass
+
+    return res
 
 
+def parse_args():
+    p = argparse.ArgumentParser(description='test')
+    group = p.add_mutually_exclusive_group()
+    group.add_argument("--empty", help="Print rows with empty values", action="store_true")
+    group.add_argument("--complete", help="Print only rows with values for all algorithms", action="store_true")
+    p.add_argument("--arguments", nargs='+', help="Arguments")
+    p.add_argument(
+        "--best-by",
+        help="Select the best run for each instance using this objectpath expression. "
+             "Mutually exclusive with aggregation/print flags; with --best-by, --max means select the largest value instead of the smallest.",
+    )
+    p.add_argument(
+        "--solution",
+        help="Objectpath expression to print alongside --best-by. Required with --best-by and accepted only with --best-by.",
+    )
+    p.add_argument("inputs", nargs='+', help="Input directories (will keep only existing dirs)")
+    p.add_argument("-o", "--out", nargs='+', help="Output Excel file and optional sheet name")
+    p.add_argument("--type", help="Type regex", default=r"_\d+\.ris$")
+    p.add_argument("--replace", help="Replace", default="")
+    p.add_argument("-g", "--grep", help="Grep")
+    p.add_argument("-v", help="Grep reverse", action="store_true")
+    p.add_argument("--onlyOne", help="Print only one", action="store_true")
+    p.add_argument("--stddev", help="Print std dev", action="store_true")
+    p.add_argument("--median", help="Print median", action="store_true")
+    p.add_argument("--mean", help="Print average", action="store_true")
+    p.add_argument("--min", help="Print min", action="store_true")
+    p.add_argument(
+        "--max",
+        help="In aggregation mode, print max. With --best-by, select the largest value instead of the smallest.",
+        action="store_true",
+    )
+    p.add_argument("--count", help="Print the count", action="store_true")
+    p.add_argument("-n", "--names", nargs='+', help="Algorithms' names")
+    p.add_argument("--column-names", nargs='+', help="Custom column names for --arguments")
+    p.add_argument("--check", help="Feasibility check (objectpath expr)")
+    p.add_argument("--full", help="Full names", action="store_true")
+    p.add_argument("--size", help="Check if an array has size greater than zero (objectpath expr)")
+    p.add_argument("--to-parquet", help="Save raw extracted records as parquet (path)")
+    p.add_argument("--columnMean", help="Print column means at end of CSV", action="store_true")
+    p.add_argument("--gap", help="Print gap row after mean (implies --columnMean)", action="store_true")
+    p.add_argument("--digits", help="Number of digits for rounding floats in output", type=int, default=2)
+    p.add_argument(
+        "--first",
+        nargs='+',
+        help="Keep first N runs ordered by an objectpath metric: ARG N [min|max]",
+    )
+    p.add_argument("--silent", help="Disable per-file path logging", action="store_true")
+    return p.parse_args()
 
-for dr in inputs:
-    v[dr] = {}
 
-    files = os.listdir(dr)
-    random.shuffle(files)
+def format_json_compact_lists(obj, indent=2, level=0):
+    sp = " " * (indent * level)
+    if isinstance(obj, dict):
+        if not obj:
+            return "{}"
+        lines = ["{"]
+        last_idx = len(obj) - 1
+        for idx, (k, v) in enumerate(obj.items()):
+            key_txt = json.dumps(k, ensure_ascii=False)
+            val_txt = format_json_compact_lists(v, indent=indent, level=level + 1)
+            comma = "," if idx < last_idx else ""
+            lines.append(" " * (indent * (level + 1)) + f"{key_txt}: {val_txt}{comma}")
+        lines.append(sp + "}")
+        return "\n".join(lines)
+    if isinstance(obj, (list, tuple)):
+        return json.dumps(obj, ensure_ascii=False, separators=(",", ":"))
+    return json.dumps(obj, ensure_ascii=False)
 
-    for fil in files:
-        if re.search("ris$", fil):
-            typ = re.sub(typeRegex, replace, fil)
 
-            if typ not in v[dr]:
-                v[dr][typ] = {}
+def get_input_display_name(path):
+    return os.path.basename(os.path.normpath(path))
 
-            types[typ] = 1
-            bigType = re.sub(bigTypeReg, "", fil)
-            bigTypes[bigType] = 1
 
-            try:
-                f=open(os.path.join(dr, fil))
+def matches_grep(typ, grep, grep_invert):
+    if not grep:
+        return True
+    matched = re.search(grep, typ) is not None
+    return not matched if grep_invert else matched
 
-                sys.stderr.write(os.path.join(dr, fil)+'\n')
-                a = json.load(f)
 
-                if onlyOne:
-                	print(json.dumps(a, indent=2))
-                	sys.exit(1)
+def collect_ris_entries(input_path, type_regex, replace, grep, grep_invert):
+    entries = []
+    try:
+        files = os.listdir(input_path)
+    except OSError as exc:
+        sys.stderr.write(f"Cannot list {input_path}: {exc}\n")
+        return entries
 
+    for file_name in files:
+        if not file_name.endswith("ris"):
+            continue
+        typ = re.sub(type_regex, replace, file_name)
+        if not matches_grep(typ, grep, grep_invert):
+            continue
+        path = os.path.join(input_path, file_name)
+        entries.append({
+            "source": input_path,
+            "file_name": file_name,
+            "typ": typ,
+            "path": path,
+        })
+    return entries
+
+
+def open_ris_entry(entry):
+    return open(entry["path"], "r", encoding="utf-8")
+
+
+def main():
+    args = parse_args()
+
+    if not args.onlyOne and not args.arguments and not args.best_by:
+        sys.exit("--arguments is required unless --onlyOne is set.")
+
+    if args.gap:
+        args.columnMean = True
+
+    inputs = [dr for dr in args.inputs if os.path.isdir(dr)]
+    if not inputs:
+        sys.exit("No valid input directories provided.")
+
+    richiesti = args.arguments or []
+    typeRegex = args.type
+    replace = args.replace or ""
+    empty = args.empty
+    complete = args.complete
+    onlyOne = args.onlyOne
+    stddev = args.stddev
+    names = args.names
+    column_names = args.column_names
+    check = args.check
+    size_expr = args.size
+    count_flag = args.count
+    full = args.full
+    grep = args.grep
+    grep_invert = args.v
+    silent = args.silent
+    best_by = args.best_by
+    solution_expr = args.solution
+
+    if not onlyOne and best_by and not solution_expr:
+        sys.exit("--solution is required with --best-by.")
+    if not onlyOne and solution_expr and not best_by:
+        sys.exit("--solution can be used only with --best-by.")
+    if best_by and not onlyOne:
+        incompatible_flags = []
+        if args.arguments:
+            incompatible_flags.append("--arguments")
+        if args.empty:
+            incompatible_flags.append("--empty")
+        if complete:
+            incompatible_flags.append("--complete")
+        if args.mean:
+            incompatible_flags.append("--mean")
+        if args.median:
+            incompatible_flags.append("--median")
+        if stddev:
+            incompatible_flags.append("--stddev")
+        if count_flag:
+            incompatible_flags.append("--count")
+        if args.min:
+            incompatible_flags.append("--min")
+        if args.first:
+            incompatible_flags.append("--first")
+        if args.columnMean:
+            incompatible_flags.append("--columnMean")
+        if args.gap:
+            incompatible_flags.append("--gap")
+        if column_names:
+            incompatible_flags.append("--column-names")
+        if full:
+            incompatible_flags.append("--full")
+        if incompatible_flags:
+            sys.exit("--best-by is mutually exclusive with: " + ", ".join(incompatible_flags))
+
+    first_arg = None
+    first_n = None
+    first_dir = "min"
+    if args.first:
+        if len(args.first) < 2 or len(args.first) > 3:
+            sys.exit("--first requires 2 or 3 arguments: ARG N [min|max]")
+        first_arg = args.first[0]
+        try:
+            first_n = int(args.first[1])
+            if first_n <= 0:
+                raise ValueError("n must be > 0")
+        except Exception:
+            sys.exit("--first N must be a positive integer")
+        if len(args.first) == 3:
+            first_dir = args.first[2].lower()
+        if first_dir not in ("min", "max"):
+            sys.exit("--first third argument must be 'min' or 'max'")
+
+    # writer
+    out_path = args.out
+    writer = None
+
+    # prepare display names
+    nomi = {}
+    if names:
+        for i, dr in enumerate(inputs):
+            if i < len(names):
+                nomi[dr] = names[i]
+            else:
+                nomi[dr] = get_input_display_name(dr)
+    else:
+        for dr in inputs:
+            nomi[dr] = get_input_display_name(dr)
+
+    # prepare display names for arguments (columns)
+    arg_display = {}
+    for i, arg in enumerate(richiesti):
+        if column_names and i < len(column_names):
+            arg_display[arg] = column_names[i]
+        else:
+            arg_display[arg] = arg
+
+    # collect raw records
+    records = []
+    run_scores = []
+    types_set = set()
+    all_entries = []
+
+    for dr in inputs:
+        all_entries.extend(collect_ris_entries(dr, typeRegex, replace, grep, grep_invert))
+
+    if onlyOne:
+        if not all_entries:
+            sys.exit("No records extracted.")
+        entry = random.choice(all_entries)
+        try:
+            with open_ris_entry(entry) as fh:
+                try:
+                    a = json.load(fh)
+                except json.JSONDecodeError:
+                    sys.exit("Selected file is not valid JSON.")
+                if not silent:
+                    sys.stderr.write(entry["path"] + "\n")
+                print(format_json_compact_lists(a, indent=2))
+                sys.exit(0)
+        except (IOError, OSError) as e:
+            sys.exit(f"Cannot open {entry['path']}: {e}")
+
+    entries_iter = all_entries
+    if not silent:
+        entries_iter = tqdm(all_entries, file=sys.stderr, unit="file")
+
+    for entry in entries_iter:
+        dr = entry["source"]
+        fil = entry["file_name"]
+        typ = entry["typ"]
+        path = entry["path"]
+        types_set.add(typ)
+
+        try:
+            with open_ris_entry(entry) as fh:
+                try:
+                    a = json.load(fh)
+                except json.JSONDecodeError:
+                    continue
 
                 tree = objectpath.Tree(a)
 
                 if check is not None:
-                	if not tree.execute('$.'+check):
-                		continue
+                    try:
+                        if not bool(tree.execute('$.' + check)):
+                            continue
+                    except Exception:
+                        continue
 
-                if size is not None:
-                	l = len(tree.execute('$.'+size))
-                	if l <= 0:
-                		continue
+                if size_expr is not None:
+                    try:
+                        seq = tree.execute('$.' + size_expr)
+                        if hasattr(seq, "__len__"):
+                            l = len(seq)
+                        else:
+                            l = len(list(seq))
+                        if l <= 0:
+                            continue
+                    except Exception:
+                        continue
 
+                run_id = path
+                if best_by is not None:
+                    try:
+                        best_val = safe_execute(tree, '$.' + best_by)
+                    except Exception:
+                        continue
+
+                    if isinstance(best_val, (int, float, np.number)):
+                        best_num = float(best_val)
+                    elif isinstance(best_val, list) and len(best_val) == 1 and isinstance(best_val[0], (int, float, np.number)):
+                        best_num = float(best_val[0])
+                    else:
+                        continue
+
+                    try:
+                        solution_val = execute_preserve_shape(tree, '$.' + solution_expr)
+                    except Exception:
+                        continue
+
+                    records.append({
+                        'dir': nomi[dr],
+                        'typ': typ,
+                        'value': best_num,
+                        'solution': solution_val,
+                        'run_id': run_id,
+                    })
+                    continue
+
+                if first_arg is not None:
+                    score_val = None
+                    try:
+                        score_val = safe_execute(tree, '$.' + first_arg)
+                    except Exception:
+                        score_val = None
+                    score_num = None
+                    if isinstance(score_val, (int, float, np.number)):
+                        score_num = float(score_val)
+                    elif isinstance(score_val, list) and len(score_val) == 1 and isinstance(score_val[0], (int, float, np.number)):
+                        score_num = float(score_val[0])
+                    if score_num is None:
+                        continue
+                    run_scores.append({'dir': nomi[dr], 'typ': typ, 'run_id': run_id, 'score': score_num})
 
                 for arg in richiesti:
-                	try:
-                		m = re.search('^(.*)\\s*\\|\\s*length$', arg)
-                		if m:
-                			arg = m.group(1)
-                			#try:
-                			x = len(tree.execute('$.'+arg))
-                			#except:
-                			#	x = 0
-                		else:
-#                			#try:
-                			x = float(tree.execute('$.'+arg))
-	#                		#except:
-#   	             		#	x = 0
+                    m = re.search(r'^(.*)\s*\|\s*length$', arg)
+                    want_length = False
+                    expr = arg
+                    if m:
+                        expr = m.group(1)
+                        want_length = True
 
-        	        	if arg not in v[dr][typ]:
-        	        		v[dr][typ][arg] = []
-                		v[dr][typ][arg].append(x)
-                	except:
-                		pass
+                    try:
+                        val = safe_execute(tree, '$.' + expr)
+                    except Exception:
+                        continue
 
-            except ValueError:
-            	pass
+                    if want_length:
+                        try:
+                            if hasattr(val, "__len__"):
+                                x = len(val)
+                            else:
+                                x = 1
+                        except Exception:
+                            x = 0
+                        records.append({'dir': nomi[dr], 'typ': typ, 'arg': arg, 'value': float(x), 'run_id': run_id})
+                    else:
+                        if isinstance(val, list) and val and all(isinstance(i, (int, float, np.number)) for i in val):
+                            for i in val:
+                                records.append({'dir': nomi[dr], 'typ': typ, 'arg': arg, 'value': float(i), 'run_id': run_id})
+                        elif isinstance(val, (int, float, np.number)):
+                            records.append({'dir': nomi[dr], 'typ': typ, 'arg': arg, 'value': float(val), 'run_id': run_id})
 
-            except TypeError:
-            	pass
+        except (IOError, OSError) as e:
+            sys.stderr.write(f"Cannot open {path}: {e}\n")
+            continue
 
-            f.close()
+    if not records:
+        sys.exit("No records extracted.")
 
-#def sostituisci(x):
-#    return re.sub("_[0-9.]*$", "", x)
-#    #return x.replace("/", "")#.replace("_", "\\_")
+    if best_by is not None:
+        best_rows = {}
+        choose_max = args.max
+        for record in records:
+            typ = record['typ']
+            current = best_rows.get(typ)
+            if current is None:
+                best_rows[typ] = record
+                continue
+            if choose_max:
+                if record['value'] > current['value']:
+                    best_rows[typ] = record
+            else:
+                if record['value'] < current['value']:
+                    best_rows[typ] = record
 
-writer = csv.writer(sys.stdout,delimiter=',')
+        if not best_rows:
+            sys.exit("No records extracted.")
 
-if out:
-    csvfile = open(out, 'w')
-    writer = csv.writer(csvfile, delimiter=',')
+        out_writer = None
+        csvfile = None
+        if out_path is None:
+            out_writer = csv.writer(sys.stdout, delimiter=',')
+        else:
+            out_args = args.out
+            if len(out_args) != 1:
+                sys.exit("--out with --best-by requires exactly one CSV output path.")
+            out_path_single = out_args[0]
+            if not out_path_single.lower().endswith(".csv"):
+                sys.exit("--out with --best-by supports only .csv output.")
+            csvfile = open(out_path_single, 'w', newline='', encoding='utf-8')
+            out_writer = csv.writer(csvfile, delimiter=',')
 
-trovati = list(filter(lambda x : x in v.keys(), inputs))
+        try:
+            out_writer.writerow(['Instance', 'Value', 'Solution'])
+            for typ in natsorted(best_rows.keys(), alg=ns.IGNORECASE):
+                out_writer.writerow([
+                    typ,
+                    f"{best_rows[typ]['value']:.{args.digits}f}",
+                    json.dumps(best_rows[typ]['solution'], ensure_ascii=False),
+                ])
+        finally:
+            if csvfile is not None:
+                csvfile.close()
+        return
 
-grandi = 0
-for bigType in bigTypes:
-	if not args.bigType and grandi > 0:
-		break
+    df = pd.DataFrame.from_records(records)
 
-	grandi += 1
+    if first_arg is not None:
+        df_scores = pd.DataFrame.from_records(run_scores)
+        if df_scores.empty:
+            sys.exit("No runs matched --first criteria.")
+        ascending = True if first_dir == "min" else False
+        df_scores = df_scores.sort_values(['dir', 'typ', 'score'], ascending=[True, True, ascending])
+        selected = df_scores.groupby(['dir', 'typ'], sort=False).head(first_n)
+        df = df.merge(selected[['dir', 'typ', 'run_id']], on=['dir', 'typ', 'run_id'], how='inner')
+        if df.empty:
+            sys.exit("No records after --first filtering.")
 
-	righe = []
+    # salvare raw dataframe in parquet se richiesto
+    if args.to_parquet:
+        try:
+            df_parquet = df.rename(columns={"dir": "algorithm", "typ": "instance", "arg": "parameter", "value": "value", "run_id": "run_id"})
+            df_parquet.to_parquet(args.to_parquet, index=False)
+            sys.stderr.write(f"Saved parquet to {args.to_parquet}\n")
+            # df.to_parquet(args.to_parquet, index=False)
+            # sys.stderr.write(f"Saved parquet to {args.to_parquet}\n")
+        except Exception as e:
+            sys.stderr.write(f"Failed to save parquet: {e}\n")
 
-	algs = trovati
+    # quali metriche calcolare
+    metrics = []
+    order_metrics = []
+    if args.mean:
+        metrics.append(('mean', 'mean'))
+        order_metrics.append('mean')
+    if args.median:
+        metrics.append(('median', 'median'))
+        order_metrics.append('median')
+    if stddev:
+        metrics.append(('std', 'std'))
+        order_metrics.append('std')
+    if count_flag:
+        metrics.append(('count', 'count'))
+        order_metrics.append('count')
+    if args.min:
+        metrics.append(('min', 'min'))
+        order_metrics.append('min')
+    if args.max:
+        metrics.append(('max', 'max'))
+        order_metrics.append('max')
 
-	quanti = 0
-	if args.mean:
-		quanti += 1
-	if args.median:
-		quanti += 1
-	if args.stddev:
-		quanti += 1
-	if args.count:
-		quanti += 1
-	if args.min:
-		quanti += 1
-	if args.max:
-		quanti += 1
+    if not metrics:
+        sys.exit("No aggregation flag requested (e.g. --mean, --median, ...).")
 
-	fieldnames = ['']
+    # groupby + agg -> DataFrame with MultiIndex (typ, dir, arg)
+    agg_map = { 'value': [m[0] for m in metrics] }
+    grouped = df.groupby(['typ', 'dir', 'arg'])['value'].agg([m[0] for m in metrics])
 
-	for alg in algs:
-		fieldnames.append(nomi[alg])
-		for i in range(0, len(richiesti)):
-			if i == 0:
-				end = quanti - 1
-			else:
-				end = quanti
-			for l in range(0, end):
-				fieldnames.append("")
+    # unstack dir and arg -> index=typ, columns MultiIndex (metric, dir, arg)
+    pivoted = grouped.unstack(['dir', 'arg'])
+
+    types_list = natsorted(list(types_set), alg=ns.IGNORECASE)
+    trovati = [nomi[dr] for dr in inputs if dr in nomi]
+
+    # costruzione header simile alla versione precedente
+    quanti = len(order_metrics)
+    righe = []
+    field_top = ['']
+    for alg in trovati:
+        field_top.append(alg)
+        for i in range(0, len(richiesti)):
+            if i == 0:
+                end = quanti - 1
+            else:
+                end = quanti
+            for l in range(0, end):
+                field_top.append("")
+    if not full:
+        righe.append(field_top)
+
+    header2 = ['instance']
+    for alg in trovati:
+        for q in richiesti:
+            if full:
+                header2.append(alg + '.' + arg_display[q])
+            else:
+                header2.append(arg_display[q])
+            for l in range(0, quanti - 1):
+                header2.append("")
+    righe.append(header2)
+
+    header3 = ['']
+    for alg in trovati:
+        for q in richiesti:
+            if args.mean: header3.append("Average")
+            if args.median: header3.append("Median")
+            if stddev: header3.append("Standard deviation")
+            if count_flag: header3.append("Count")
+            if args.min: header3.append("Minimum")
+            if args.max: header3.append("Maximum")
+    if quanti > 1:
+        righe.append(header3)
+
+    # helper per estrarre dalla tabella pivotata
+    def get_from_pivot(typ, dr, q, metric):
+        try:
+            # pivoted[metric][dr][q] if metric is first level
+            val = pivoted[(metric, dr, q)].get(typ) if (metric, dr, q) in pivoted.columns else None
+        except Exception:
+            val = None
+        if val is None or (hasattr(val, 'item') and pd.isna(val)):
+            return ""
+        # val può essere numpy scalar
+        try:
+            return float(val)
+        except Exception:
+            return ""
+
+    def excel_col_letter(col_idx_one_based):
+        # Convert 1-based column index to Excel column letter.
+        letters = []
+        while col_idx_one_based > 0:
+            col_idx_one_based, rem = divmod(col_idx_one_based - 1, 26)
+            letters.append(chr(65 + rem))
+        return ''.join(reversed(letters))
+
+    for typ in types_list:
+        row = [typ]
+        toPrint = False
+        missing_by_alg = {alg: False for alg in trovati}
+
+        for dr in trovati:
+            for q in richiesti:
+                for metric in order_metrics:
+                    # metric names in pivot are the same strings (mean, median, std, count, min, max)
+                    try:
+                        # pivoted columns are MultiIndex (metric, dir, arg)
+                        if (metric, dr, q) in pivoted.columns:
+                            val = pivoted[(metric, dr, q)].get(typ)
+                        else:
+                            val = None
+                    except Exception:
+                        val = None
+
+                    if val is None or (hasattr(val, 'item') and pd.isna(val)):
+                        missing_by_alg[dr] = True
+                        if metric == 'count':
+                            row.append(0)
+                        else:
+                            row.append("")
+                    else:
+                        # normalizza count come int
+                        if metric == 'count':
+                            row.append(int(val))
+                        else:
+                            try:
+                                row.append(float(val))
+                            except Exception:
+                                row.append("")
+                        toPrint = True
+
+        if complete and any(missing_by_alg.values()):
+            continue
+
+        if empty or toPrint:
+            toWrite = True
+            if grep:
+                if not re.search(grep, typ):
+                    toWrite = False
+                if grep_invert:
+                    toWrite = not toWrite
+
+            if toWrite:
+                righe.append(row)
+
+    # scrivi CSV su stdout oppure su file
+    out_lines = []
+    if len(righe) > 2:
+        for row in righe:
+            out_lines.append(','.join(map(str, round_floats(row, args.digits))))
+
+    # optionally compute column means and append as last CSV row
+    if args.columnMean and len(out_lines) > 0:
+        # determine number of header rows at start of righe
+        header_count = 0
+        for r in righe:
+            if len(r) == 0:
+                header_count += 1
+                continue
+            if r[0] in ('', 'instance'):
+                header_count += 1
+                continue
+            break
+        # number of columns from first data row (after headers)
+        if header_count < len(righe):
+            num_cols = len(righe[header_count])
+            means = ["MEAN"]  # first column label
+            for c in range(1, num_cols):
+                vals = []
+                for data_row in righe[header_count:]:
+                    if c < len(data_row):
+                        v = data_row[c]
+                        try:
+                            vals.append(float(v))
+                        except Exception:
+                            pass
+                if vals:
+                    means.append(np.mean(vals))
+                else:
+                    means.append("")
+
+            gap_vals = None
+            if args.gap:
+                gap_vals = ["GAP"]
+                block_size = len(richiesti) * len(order_metrics)
+                for c in range(1, num_cols):
+                    if c <= block_size:
+                        gap_vals.append("")
+                        continue
+                    base_idx = 1 + ((c - 1) % block_size)
+                    try:
+                        base_val = float(means[base_idx])
+                        cur_val = float(means[c])
+                    except Exception:
+                        gap_vals.append("")
+                        continue
+                    if base_val == 0:
+                        gap_vals.append("")
+                    else:
+                        gap_vals.append(((cur_val - base_val) / base_val) * 100.0)
+
+            out_lines.append('')
+            out_lines.append(','.join(map(str, round_floats(means, args.digits))))
+            if gap_vals is not None:
+                out_lines.append(','.join(map(str, round_floats(gap_vals, args.digits))))
+
+            if out_path is None:
+                righe.append([""] * num_cols)
+                righe.append(means)
+                if gap_vals is not None:
+                    righe.append(gap_vals)
+            else:
+                # Excel: write formulas so values stay numeric and auto-update
+                data_start_row = header_count + 1  # 1-based in Excel
+                data_end_row = len(righe)  # last data row (before mean row)
+                means_excel = ["MEAN"]
+                for c in range(2, num_cols + 1):
+                    if data_end_row < data_start_row:
+                        means_excel.append("")
+                    else:
+                        col_letter = excel_col_letter(c)
+                        means_excel.append(f"=AVERAGE({col_letter}{data_start_row}:{col_letter}{data_end_row})")
+                righe.append([""] * num_cols)
+                mean_row_idx = len(righe) + 1  # 1-based row index in Excel after append
+                righe.append(means_excel)
+
+                if args.gap:
+                    gap_excel = ["GAP"]
+                    block_size = len(richiesti) * len(order_metrics)
+                    for c in range(2, num_cols + 1):
+                        if (c - 1) <= block_size:
+                            gap_excel.append("")
+                            continue
+                        base_col_idx = 1 + ((c - 2) % block_size)
+                        base_col_letter = excel_col_letter(base_col_idx + 1)
+                        cur_col_letter = excel_col_letter(c)
+                        gap_excel.append(
+                            f"=IF({base_col_letter}{mean_row_idx}=0,\"\",({cur_col_letter}{mean_row_idx}-{base_col_letter}{mean_row_idx})/{base_col_letter}{mean_row_idx})"
+                        )
+                    righe.append(gap_excel)
+    if out_path is None:
+        for ln in out_lines:
+            print(ln)
+    else:
+        out_args = args.out
+        if len(out_args) < 1 or len(out_args) > 2:
+            sys.exit("--out requires 1 or 2 arguments: FILE [SHEET]")
+        out_path = out_args[0]
+        sheet_name = out_args[1] if len(out_args) == 2 else None
+
+        out_lower = out_path.lower()
+        if not (out_lower.endswith(".xlsx") or out_lower.endswith(".xls")):
+            sys.exit("--out supports only .xlsx or .xls output")
+
+        df_out = pd.DataFrame(righe)
+        file_exists = os.path.exists(out_path)
+
+        if sheet_name and file_exists:
+            if out_lower.endswith(".xls"):
+                sys.exit("Appending/replacing sheets is not supported for .xls. Use .xlsx instead.")
+            engine = "openpyxl"
+            mode = "a"
+            if_sheet_exists = "replace"
+        else:
+            mode = "w"
+            if_sheet_exists = None
+            if out_lower.endswith(".xlsx"):
+                try:
+                    import xlsxwriter  # noqa: F401
+                    engine = "xlsxwriter"
+                except Exception:
+                    engine = "openpyxl"
+            else:
+                try:
+                    import xlwt  # noqa: F401
+                    engine = "xlwt"
+                except Exception:
+                    sys.exit("Missing xlwt for .xls output. Install xlwt or use .xlsx.")
+
+        sheet_to_use = sheet_name or "Sheet1"
+        num_fmt = "0" if args.digits <= 0 else "0." + ("0" * args.digits)
+        pct_fmt = "0" if args.digits <= 0 else "0." + ("0" * args.digits) + "%"
+
+        try:
+            with pd.ExcelWriter(out_path, engine=engine, mode=mode, if_sheet_exists=if_sheet_exists) as writer:
+                df_out.to_excel(writer, index=False, header=False, sheet_name=sheet_to_use)
+                if engine == "xlsxwriter":
+                    workbook = writer.book
+                    worksheet = writer.sheets[sheet_to_use]
+                    fmt = workbook.add_format({"num_format": num_fmt})
+                    if df_out.shape[1] > 1:
+                        worksheet.set_column(1, df_out.shape[1] - 1, None, fmt)
+                    if args.columnMean:
+                        mean_row_idx = df_out.shape[0] - (1 if args.gap else 0)  # 1-based row index
+                        worksheet.set_row(mean_row_idx - 1, None, fmt)
+                    if args.gap:
+                        gap_row_idx = df_out.shape[0]  # 1-based row index in Excel
+                        gap_fmt = workbook.add_format({"num_format": pct_fmt})
+                        worksheet.set_row(gap_row_idx - 1, None, gap_fmt)
+                    # Force full recalculation on load (LibreOffice/Excel)
+                    workbook.set_calc_mode('auto')
+                    workbook.set_calc_on_load()
+                elif engine == "openpyxl":
+                    ws = writer.sheets.get(sheet_to_use) or writer.book[sheet_to_use]
+                    for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=2, max_col=ws.max_column):
+                        for cell in row:
+                            if isinstance(cell.value, (int, float, np.number)):
+                                cell.number_format = num_fmt
+                    if args.columnMean and ws.max_row >= 1:
+                        mean_row_idx = ws.max_row - (1 if args.gap else 0)
+                        for cell in ws[mean_row_idx][1:]:
+                            if cell.value is not None:
+                                cell.number_format = num_fmt
+                    if args.gap and ws.max_row >= 1:
+                        gap_row_idx = ws.max_row
+                        for cell in ws[gap_row_idx][1:]:
+                            if cell.value is not None:
+                                cell.number_format = pct_fmt
+                    # Force full recalculation on load (LibreOffice/Excel)
+                    try:
+                        writer.book.calc_properties.calcMode = "auto"
+                        writer.book.calc_properties.fullCalcOnLoad = True
+                    except Exception:
+                        pass
+        except Exception as e:
+            sys.exit(f"Failed to save Excel: {e}")
 
 
-	if not full:
-		righe.append(fieldnames)
-	#writer.writerow(fieldnames)
-
-	fieldnames = ['instance']
-
-
-	for alg in algs:
-		for q in richiesti:
-			if full:
-				fieldnames.append(nomi[alg] + '.' + q)
-			else:
-				fieldnames.append(q)
-
-			for l in range(0, quanti-1):
-				fieldnames.append("")
-
-	righe.append(fieldnames)
-
-	fieldnames = ['']
-
-	for alg in algs:
-		for q in richiesti:
-			if args.mean:
-				fieldnames.append("Average")
-			if args.median:
-				fieldnames.append("Median")
-			if args.stddev:
-				fieldnames.append("Standard deviation")
-			if args.count:
-				fieldnames.append("Count")
-			if args.min:
-				fieldnames.append("Minimum")
-			if args.max:
-				fieldnames.append("Maximum")
-
-	if quanti > 1:
-		righe.append(fieldnames)
-
-	for typ in natsorted(types, alg=ns.IGNORECASE):
-		if (typ.find(bigType) == 0 or not args.bigType):
-			row = []
-			toPrint = False
-			row.append(typ)
-
-			for dr in trovati:
-				if typ in v[dr]:
-
-					for q in richiesti:
-						m = re.search("^(.*)\\s*\\|\\s*length$", q)
-						if m:
-							q = m.group(1)
-
-
-						#row.append(v[dr][typ][q] / div)
-						if args.mean:
-							if q in v[dr][typ] and len(v[dr][typ][q]) > 0:
-								row.append(numpy.mean(v[dr][typ][q]))
-								toPrint = True
-							else:
-								row.append("")
-						if args.median:
-							if q in v[dr][typ] and len(v[dr][typ][q]) > 0:
-								row.append(numpy.median(v[dr][typ][q]))
-								toPrint = True
-							else:
-								row.append("")
-						if args.stddev:
-							if q in v[dr][typ] and len(v[dr][typ][q]) > 0:
-								row.append(numpy.std(v[dr][typ][q]))
-								toPrint = True
-							else:
-								row.append("")
-						if args.count:
-							if q in v[dr][typ]:
-								row.append(len(v[dr][typ][q]))
-								toPrint = True
-							else:
-								row.append(0)
-						if args.min:
-							if q in v[dr][typ] and len(v[dr][typ][q]) > 0:
-								row.append(numpy.min(v[dr][typ][q]))
-								toPrint = True
-							else:
-								row.append("")
-						if args.max:
-							if q in v[dr][typ] and len(v[dr][typ][q]) > 0:
-								row.append(numpy.max(v[dr][typ][q]))
-								toPrint = True
-							else:
-								row.append("")
-
-
-						
-				else:
-					toPrint = False
-					for q in richiesti:
-						if args.mean:
-							row.append("")
-						if args.median:
-							row.append("")
-						if args.stddev:
-							row.append("")
-						if args.min:
-							row.append("")
-						if args.max:
-							row.append("")
-						if args.count:
-							row.append("")
-
-
-			if empty or toPrint:
-				toWrite = True
-				if grep:
-					if not re.search(grep, typ):
-						toWrite = False
-
-					if args.v:
-						toWrite = not toWrite
-
-
-				if toWrite:
-					righe.append(row)
-					#writer.writerow(row)
-	if len(righe) > 2:
-		for row in righe:
-			writer.writerow(round_floats(row))
-		#for i in range(0, 5):
-		#	writer.writerow([])
+if __name__ == "__main__":
+    main()

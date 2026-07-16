@@ -36,7 +36,7 @@ EOF
 }
 
 log() {
-  printf '%s [%s] %s\n' "$(date '+%F %T')" "pausectl" "$*" >>"$LOG_FILE" 2>/dev/null || true
+  printf '%s [%s] %s\n' "$(date '+%F %T')" "pausectl" "$*" | tee -a "$LOG_FILE" || true
 }
 
 ensure_dir() {

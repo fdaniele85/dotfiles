@@ -1,0 +1,126 @@
+#!/bin/zsh
+
+if [[ $# -eq 0 ]]; then
+    echo "Usage: $0 [-y] <file_or_directory> [...]"
+    exit 1
+fi
+
+zparseopts -D y=opt_yes || { echo "Usage: $0 [-y] <file_or_directory> [...]"; exit 1 }
+
+AUTO_YES=${opt_yes:+1}
+XZ_OPTS=(-9 --extreme)
+TMPDIR=$(mktemp -d)
+
+cleanup() {
+    rm -rf "$TMPDIR"
+}
+trap cleanup EXIT
+
+human_size() {
+    du -sh "$1" 2>/dev/null | cut -f1
+}
+
+bytes_size() {
+    du -sb "$1" 2>/dev/null | cut -f1
+}
+
+extract_archive() {
+    local input=$1
+    local destdir=$2
+    if [[ "$input" =~ '\.(tar\.gz|tgz)$' ]]; then
+        tar -xzf "$input" -C "$destdir"
+    elif [[ "$input" =~ '\.(tar\.bz2|tbz2)$' ]]; then
+        tar -xjf "$input" -C "$destdir"
+    elif [[ "$input" =~ '\.tar\.zst$' ]]; then
+        tar -x --use-compress-program=zstd -f "$input" -C "$destdir"
+    elif [[ "$input" =~ '\.(zip|ZIP)$' ]]; then
+        unzip -q "$input" -d "$destdir"
+    elif [[ "$input" =~ '\.7z$' ]]; then
+        7z x "$input" -o"$destdir" > /dev/null
+    else
+        return 1
+    fi
+}
+
+process_item() {
+    local input=$(realpath "$1")
+    local basename=$(basename "$input")
+    local input_dir=$(dirname "$input")
+    local name_noext=""
+    local tmpextract=""
+    local outfile=""
+
+    if [[ -d "$input" ]]; then
+        name_noext="$basename"
+        outfile="$TMPDIR/${name_noext}.tar.xz"
+        echo "📁 Cartella: $input"
+        echo "  Dimensione originale: $(human_size "$input")"
+        echo "  Compressione in corso..."
+        tar -c -C "$input_dir" "$basename" | xz "${XZ_OPTS[@]}" > "$outfile"
+
+    elif [[ -f "$input" ]]; then
+        if [[ "$input" =~ '\.tar\.xz$' ]]; then
+            echo "✅ Già in formato tar.xz, salto: $input"
+            return
+        elif [[ "$input" =~ '\.(tar\.gz|tgz)$' ]]; then
+            name_noext="${basename%.tar.gz}"
+            name_noext="${name_noext%.tgz}"
+        elif [[ "$input" =~ '\.(tar\.bz2|tbz2)$' ]]; then
+            name_noext="${basename%.tar.bz2}"
+            name_noext="${name_noext%.tbz2}"
+        elif [[ "$input" =~ '\.tar\.zst$' ]]; then
+            name_noext="${basename%.tar.zst}"
+        elif [[ "$input" =~ '\.(zip|ZIP)$' ]]; then
+            name_noext="${basename%.zip}"
+        elif [[ "$input" =~ '\.7z$' ]]; then
+            name_noext="${basename%.7z}"
+        else
+            echo "⚠️  Tipo non supportato: $input"
+            return
+        fi
+
+        outfile="$TMPDIR/${name_noext}.tar.xz"
+        echo "📦 Archivio: $input"
+        echo "  Dimensione originale: $(human_size "$input")"
+        echo "  Estrazione in corso..."
+        tmpextract="$TMPDIR/extract_${name_noext}"
+        mkdir -p "$tmpextract"
+        extract_archive "$input" "$tmpextract" || { echo "  ⚠️  Estrazione fallita."; return }
+        echo "  Ricompressione in corso..."
+        tar -c -C "$tmpextract" . | xz "${XZ_OPTS[@]}" > "$outfile"
+
+    else
+        echo "⚠️  Non trovato: $input"
+        return
+    fi
+
+    local size_before=$(bytes_size "$input")
+    local size_after=$(bytes_size "$outfile")
+    local saved=$(( size_before - size_after ))
+    local saved_human=$(numfmt --to=iec $saved 2>/dev/null || echo "${saved} bytes")
+
+    echo "  Dimensione compressa: $(human_size "$outfile")"
+    echo "  Spazio risparmiato:   ${saved_human}"
+
+    local do_replace=0
+    if [[ -n "$AUTO_YES" ]]; then
+        do_replace=1
+    else
+        echo -n "  Sostituire l'originale? [y/N] "
+        read -r answer
+        [[ "$answer" == "y" || "$answer" == "Y" ]] && do_replace=1
+    fi
+
+    if [[ $do_replace -eq 1 ]]; then
+        rm -rf "$input"
+        mv "$outfile" "${input_dir}/${name_noext}.tar.xz"
+        echo "  ✅ Sostituito."
+    else
+        echo "  ⏭️  Originale mantenuto, archivio scartato."
+    fi
+}
+
+for item in "$@"; do
+    process_item "$item"
+    echo ""
+done

@@ -1,0 +1,50 @@
+.TH NOTIFY-RUN 1 "Luglio 2026" "notify-run 1.0" "Comandi Utente"
+.SH NOME
+notify-run \- esegue un comando e notifica inizio/fine via telegram-send
+.SH SINTASSI
+.B notify-run
+[\fB\-l\fR \fIetichetta\fR]
+\fB\-\-\fR \fIcomando\fR [\fIargomenti...\fR]
+.SH DESCRIZIONE
+.B notify-run
+esegue il
+.I comando
+specificato, inviando una notifica Telegram (tramite
+.BR telegram-send (1))
+all'avvio e al termine, con esito e tempo impiegato.
+.PP
+Il retry non è gestito da questo script: componilo con
+.BR run-one-until-success (1)
+se ti serve rieseguire il comando fino al successo.
+.SH OPZIONI
+.TP
+.BR \-l " " \fIetichetta\fR
+Testo da usare nelle notifiche al posto del comando stesso.
+.TP
+.B \-h
+Mostra l'aiuto.
+.SH ESEMPI
+Esecuzione singola con notifica:
+.PP
+.RS
+.nf
+notify-run -- rsync -aP --remove-source-files "Twin Peaks" studio:Video/
+.fi
+.RE
+.PP
+Con retry fino a successo:
+.PP
+.RS
+.nf
+notify-run -- run-one-until-success rsync -aP "Twin Peaks" studio:Video/
+.fi
+.RE
+.SH FILE DI CONFIGURAZIONE
+Richiede che
+.BR telegram-send (1)
+sia configurato (token bot e chat id).
+.SH VEDI ANCHE
+.BR run-one (1),
+.BR telegram-send (1)
+.SH AUTORE
+Daniele

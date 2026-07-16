@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Mostra le prime e ultime N righe di un file o dello stdin
+
+# default
+n=10
+file=""
+
+# parsing semplice dell'opzione -n
+while [[ "$1" =~ ^- && ! "$1" == "--" ]]; do
+  case $1 in
+    -n )
+      shift
+      n="$1"
+      ;;
+    * )
+      echo "Uso: $0 [-n NUM] [file]"
+      exit 1
+      ;;
+  esac
+  shift
+done
+[[ "$1" == '--' ]] && shift
+file="$1"
+
+# funzione per leggere da file o stdin
+if [[ -n "$file" ]]; then
+  # se esiste un file
+  if [[ ! -f "$file" ]]; then
+    echo "Errore: file '$file' non trovato." >&2
+    exit 1
+  fi
+  head -n "$n" "$file"
+  echo "..."
+  tail -n "$n" "$file"
+else
+  # leggi da stdin
+  input=$(cat)
+  head -n "$n" <<< "$input"
+  echo "..."
+  tail -n "$n" <<< "$input"
+fi

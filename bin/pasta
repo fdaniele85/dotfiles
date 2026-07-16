@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+
+# ---------------------------
+# pasta - prints the clipboard to stdout
+# Only uses xclip and fallback file. No extra output.
+# ---------------------------
+
+set -euo pipefail
+
+# Prefer xclip if available
+if command -v xclip >/dev/null 2>&1; then
+if xclip -selection clipboard -o 2>/dev/null; then
+exit 0
+fi
+fi
+
+
+# Fallback to file
+CLIPFILE="$HOME/.local/share/clipboard/text"
+if [ -f "$CLIPFILE" ]; then
+cat "$CLIPFILE"
+exit 0
+fi
+
+
+# Nothing to print — exit non-zero silently
+exit 1

@@ -14,3 +14,13 @@ export UPDATE_DOTFILES_DAYS=15
 
 export PATH=".:/home/daniele/.dotfiles/bin:$PATH"
 export VISUAL="subl -w"
+
+if [[ -d /home/daniele/envs/beets/ ]]; then
+	export PATH="$PATH:/home/daniele/envs/beets/bin/"
+fi
+
+if [[ -d /home/daniele/.local/bin/ ]]; then
+    export PATH="$PATH:/home/daniele/.local/bin/"
+fi
+
+export MANPATH="$HOME/.dotfiles/man:$MANPATH"

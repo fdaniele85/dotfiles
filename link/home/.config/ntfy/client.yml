@@ -1,0 +1,17 @@
+default-host: https://ntfy.sh
+
+subscribe:
+- topic: radarr-dde20e4f-2382-4fe9
+  command: /home/daniele/.dotfiles/bin/notify.sh "$t" "$m"
+- topic: backup-6705ae2d-4e1f-429c
+  command: /home/daniele/.dotfiles/bin/notify.sh "$t" "$m"
+- topic: n8n-ad3a7aba-5732-4e3f
+  command: /home/daniele/.dotfiles/bin/notify.sh "$t" "$m"
+- topic: sonarr-96826398-4692-4d66
+  command: /home/daniele/.dotfiles/bin/notify.sh "$t" "$m"
+- topic: healthchecks-11476a59-65ef-467d
+  command: /home/daniele/.dotfiles/bin/notify.sh "$t" "$m"
+- topic: testing-9391f8f1-3ee6-4919
+  command: /home/daniele/.dotfiles/bin/notify.sh "$t" "$m"
+- topic: on-this-day-db1fcd79b057
+  command: /home/daniele/.dotfiles/bin/notify.sh "$t" "$m"
