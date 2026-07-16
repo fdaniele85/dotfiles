@@ -1,0 +1,29 @@
+#compdef poweroff-after
+
+_poweroff_after() {
+    local curcontext="$curcontext" state line ret=1
+
+    _arguments -C -s -S \
+        '(-h --help)'{-h,--help}'[mostra aiuto]' \
+        '-s[intervallo di polling in secondi]:secondi:' \
+        '*::pattern comando:->command' \
+        && ret=0
+
+    case $state in
+        command)
+            if (( ${#line} == 0 )); then
+                words=( "" )
+                CURRENT=1
+            else
+                words=( "${line[@]}" )
+                CURRENT=${#words}
+            fi
+            _normal
+            ret=$?
+            ;;
+    esac
+
+    return ret
+}
+
+_poweroff_after "$@"

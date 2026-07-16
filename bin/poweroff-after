@@ -1,4 +1,16 @@
 #!/bin/zsh
+usage() {
+	cat <<'EOF'
+Usage: poweroff-after [-s SECONDS] COMMAND_PATTERN
+
+Wait until processes matching COMMAND_PATTERN finish, then power off the system.
+
+Options:
+  -s SECONDS  Poll interval in seconds. Default: 30.
+  -h, --help  Show this help.
+EOF
+}
+
 convertsecs() {
  ((h=${1}/3600))
  ((m=(${1}%3600)/60))
@@ -26,14 +38,23 @@ matching_pids() {
 	done
 }
 
-while getopts "s:" opt; do
+if [[ "${1:-}" = "--help" ]]; then
+	usage
+	exit 0
+fi
+
+while getopts "hs:" opt; do
 	case "$opt" in
+		h)
+			usage
+			exit 0
+			;;
 		s)
 			SLEEP_SECONDS="$OPTARG"
 			;;
 		*)
-			echo "Uso: $0 [-s secondi] comando"
-			exit 1
+			usage >&2
+			exit 64
 			;;
 	esac
 done
@@ -41,17 +62,18 @@ done
 shift $((OPTIND - 1))
 
 if [[ -z "$1" ]]; then
-	echo "Necessario comando"
-	exit 1
+	echo "poweroff-after: missing COMMAND_PATTERN" >&2
+	usage >&2
+	exit 64
 fi
 
 if ! [[ "$SLEEP_SECONDS" =~ '^[0-9]+$' ]] || (( SLEEP_SECONDS <= 0 )); then
-	echo "Valore -s non valido: $SLEEP_SECONDS"
-	exit 1
+	echo "poweroff-after: invalid -s value: $SLEEP_SECONDS" >&2
+	exit 64
 fi
 
 if [[ -z "$(matching_pids "$1")" ]]; then
-	echo "Il comando non sta girando"
+	echo "No matching process is running."
 	exit 2
 fi
 
@@ -61,9 +83,9 @@ while true; do
 	[[ -z "$pids" ]] && break
 	ora=$(date +%s)
 	secondi=$((ora-inizio))
-	print -n "\rAspetto la fine di $1 da $(convertsecs $secondi)"
+	print -n "\rWaiting for $1 to finish: $(convertsecs $secondi)"
 	sleep "$SLEEP_SECONDS"
 done
 
-print "\nTerminato, spengo..."
+print "\nFinished, powering off..."
 poweroff

@@ -1,0 +1,96 @@
+.TH POWEROFF-AFTER 1 "Luglio 2026" "poweroff-after 1.0" "Comandi Utente"
+.SH NOME
+poweroff-after \- spegne il sistema dopo la fine di un processo
+.SH SINTASSI
+.B poweroff-after
+[\fB\-s\fR \fISECONDS\fR]
+.I COMMAND_PATTERN
+.br
+.B poweroff-after
+[\fB\-h\fR|\fB\-\-help\fR]
+.SH DESCRIZIONE
+.B poweroff-after
+attende finche non terminano i processi che corrispondono a
+.IR COMMAND_PATTERN ,
+poi esegue
+.BR poweroff (8).
+.PP
+La ricerca dei processi usa
+.BR pgrep (1)
+con l'opzione
+.BR \-f ,
+quindi il pattern viene confrontato con l'intera riga di comando del processo,
+non solo con il nome dell'eseguibile.
+.PP
+Lo script ignora se stesso e il processo
+.BR pgrep (1)
+usato per la ricerca.
+.SH OPZIONI
+.TP
+.BI "\-s " SECONDS
+Intervallo di polling in secondi. Il valore predefinito e
+.BR 30 .
+.I SECONDS
+deve essere un intero positivo.
+.TP
+.BR \-h ", " \-\-help
+Mostra l'aiuto.
+.SH ARGOMENTI
+.TP
+.I COMMAND_PATTERN
+Pattern passato a
+.BR "pgrep -f" .
+Usare quoting della shell se il pattern contiene spazi o caratteri speciali.
+.SH ESEMPI
+Spegnere il sistema quando non ci sono piu processi
+.B rsync
+in esecuzione:
+.PP
+.RS
+.nf
+poweroff-after rsync
+.fi
+.RE
+.PP
+Controllare ogni 10 secondi:
+.PP
+.RS
+.nf
+poweroff-after -s 10 ffmpeg
+.fi
+.RE
+.PP
+Usare un pattern piu specifico:
+.PP
+.RS
+.nf
+poweroff-after 'rsync .* /mnt/backup'
+.fi
+.RE
+.SH STATO DI USCITA
+.TP
+.B 0
+Il processo monitorato e terminato e
+.BR poweroff (8)
+e stato eseguito.
+.TP
+.B 2
+Nessun processo corrispondente era in esecuzione all'avvio.
+.TP
+.B 64
+Uso non valido, argomento mancante o valore di
+.B \-s
+non valido.
+.SH DIPENDENZE
+.BR zsh (1),
+.BR pgrep (1),
+.BR ps (1),
+.BR poweroff (8)
+.SH AVVERTENZE
+.B poweroff-after
+esegue davvero
+.BR poweroff (8)
+quando il pattern non corrisponde piu ad alcun processo. Verificare il pattern
+prima di usarlo su sistemi condivisi o remoti.
+.SH AUTORE
+Daniele
