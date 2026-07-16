@@ -1,3 +1,5 @@
 backups/*
 .stignore
 .idea
+__pycache__/
+*.pyc

@@ -1,0 +1,193 @@
+.TH PAUSECTL 1 "Luglio 2026" "pausectl 1.0" "Comandi Utente"
+.SH NOME
+pausectl \- controlla pause nominali per comandi schedulati
+.SH SINTASSI
+.B pausectl
+.B pause
+.I PAUSE_NAME
+.br
+.B pausectl
+.B resume
+.I PAUSE_NAME
+.br
+.B pausectl
+.B status
+[\fIPAUSE_NAME\fR]
+.br
+.B pausectl
+.B run
+.I PAUSE_NAME
+[\fB\-\-mode\fR \fIskip|wait\fR]
+[\fB\-\-timeout\fR \fISECS\fR]
+[\fB\-\-poll\fR \fISECS\fR]
+.B \-\-
+.I COMMAND
+[\fIARGS...\fR]
+.br
+.B pausectl
+[\fB\-h\fR|\fB\-\-help\fR|\fBhelp\fR]
+.SH DESCRIZIONE
+.B pausectl
+gestisce pause identificate da un nome, usando file sentinella nella directory
+.BR ~/.local/pause .
+.PP
+Il comando è pensato come guardia per job schedulati o automazioni: una pausa
+può far saltare l'esecuzione di un comando, oppure farlo attendere fino alla
+rimozione della pausa.
+.PP
+Non dipende da
+.BR XDG_RUNTIME_DIR .
+La directory delle pause viene creata automaticamente con permessi
+.BR 700 .
+.SH COMANDI
+.TP
+.BI "pause " PAUSE_NAME
+Attiva la pausa
+.IR PAUSE_NAME ,
+creando il file sentinella corrispondente.
+.TP
+.BI "resume " PAUSE_NAME
+Disattiva la pausa
+.IR PAUSE_NAME ,
+rimuovendo il file sentinella se esiste.
+.TP
+.BI "status " [PAUSE_NAME]
+Senza argomenti, mostra la directory delle pause e l'elenco delle pause attive.
+Con
+.IR PAUSE_NAME ,
+controlla solo quella pausa.
+.TP
+.BI "run " PAUSE_NAME " [opzioni] -- " COMMAND " [ARGS...]"
+Esegue
+.I COMMAND
+solo in base allo stato della pausa indicata.
+.SH OPZIONI DI RUN
+.TP
+.BI "\-\-mode " skip|wait
+Modalità di gestione quando la pausa è attiva.
+.B skip
+salta il comando ed esce con successo.
+.B wait
+attende che la pausa venga rimossa prima di eseguire il comando.
+Il valore predefinito è
+.BR skip ,
+oppure il valore di
+.BR PAUSE_MODE .
+.TP
+.BI "\-\-timeout " SECS
+Timeout in secondi usato dalla modalità
+.BR wait .
+Con valore
+.B 0
+l'attesa è indefinita. Il valore predefinito è
+.BR 0 ,
+oppure il valore di
+.BR WAIT_TIMEOUT .
+.TP
+.BI "\-\-poll " SECS
+Intervallo di polling in secondi quando
+.BR inotifywait (1)
+non è disponibile. Il valore predefinito è
+.BR 5 ,
+oppure il valore di
+.BR WAIT_POLL .
+.TP
+.B \-\-
+Separa le opzioni di
+.B pausectl run
+dal comando da eseguire.
+.TP
+.BR \-h ", " \-\-help
+Mostra l'aiuto.
+.SH VARIABILI D'AMBIENTE
+.TP
+.B LOG_FILE
+File in cui appendere i messaggi di log. Il valore predefinito è
+.BR /dev/null .
+.TP
+.B PAUSE_MODE
+Modalità predefinita per
+.BR run .
+Valori validi:
+.B skip
+e
+.BR wait .
+.TP
+.B WAIT_TIMEOUT
+Timeout predefinito, in secondi, per
+.BR "run --mode wait" .
+.TP
+.B WAIT_POLL
+Intervallo di polling predefinito, in secondi, per
+.BR "run --mode wait" .
+.SH FILE
+.TP
+.B ~/.local/pause/
+Directory contenente i file sentinella delle pause attive.
+.SH ESEMPI
+Mettere in pausa i job associati a
+.BR backup :
+.PP
+.RS
+.nf
+pausectl pause backup
+.fi
+.RE
+.PP
+Riprendere i job associati a
+.BR backup :
+.PP
+.RS
+.nf
+pausectl resume backup
+.fi
+.RE
+.PP
+Saltare un comando quando la pausa è attiva:
+.PP
+.RS
+.nf
+pausectl run backup -- rsync -a source/ dest/
+.fi
+.RE
+.PP
+Attendere al massimo un'ora che la pausa venga rimossa:
+.PP
+.RS
+.nf
+pausectl run backup --mode wait --timeout 3600 -- rsync -a source/ dest/
+.fi
+.RE
+.SH STATO DI USCITA
+.TP
+.B 0
+Comando completato con successo. In modalità
+.B skip
+o dopo timeout in modalità
+.BR wait ,
+anche un comando saltato esce con
+.BR 0 .
+.TP
+.B 1
+.B status
+con un nome specifico non ha trovato una pausa attiva.
+.TP
+.B 64
+Uso non valido, comando sconosciuto, argomento mancante o opzione non valida.
+.PP
+Quando
+.B run
+esegue effettivamente
+.IR COMMAND ,
+lo script viene sostituito con quel comando tramite
+.BR exec (1)
+e lo stato di uscita è quello del comando eseguito.
+.SH DIPENDENZE
+.BR bash (1)
+.PP
+.BR inotifywait (1)
+è opzionale: se disponibile viene usato in modalità
+.BR wait ,
+altrimenti lo script usa polling.
+.SH AUTORE
+Daniele

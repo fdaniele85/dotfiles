@@ -1,0 +1,70 @@
+#compdef pausectl
+
+_pausectl_pause_names() {
+    local pause_dir="${HOME}/.local/pause"
+    [[ -d "$pause_dir" ]] || return 1
+
+    _files -W "$pause_dir" -g '*(-.)'
+}
+
+_pausectl() {
+    local curcontext="$curcontext" state line ret=1
+    local -a commands
+
+    commands=(
+        'pause:attiva una pausa nominale'
+        'resume:rimuove una pausa nominale'
+        'status:mostra pause attive o stato di una pausa'
+        'run:esegue un comando rispettando una pausa'
+        'help:mostra aiuto'
+    )
+
+    _arguments -C \
+        '(-h --help)'{-h,--help}'[mostra aiuto]' \
+        '1:comando:->command' \
+        '*::argomento:->args' \
+        && ret=0
+
+    case $state in
+        command)
+            _describe -t commands 'comandi pausectl' commands && ret=0
+            ;;
+        args)
+            case $line[1] in
+                pause)
+                    _message 'nome pausa'
+                    ret=0
+                    ;;
+                resume|status)
+                    _pausectl_pause_names || _message 'nome pausa'
+                    ret=0
+                    ;;
+                run)
+                    _arguments -C \
+                        '1:nome pausa:_pausectl_pause_names' \
+                        '--mode[modalita quando la pausa e attiva]:modalita:(skip wait)' \
+                        '--timeout[timeout in secondi per mode wait]:secondi:' \
+                        '--poll[intervallo di polling in secondi]:secondi:' \
+                        '(- *)'{-h,--help}'[mostra aiuto]' \
+                        '--[fine opzioni di pausectl]' \
+                        '*::comando:->run_command' \
+                        && ret=0
+
+                    if [[ $state == run_command ]]; then
+                        if [[ ${line[1]} == '--' ]]; then
+                            shift 1 line
+                        fi
+                        words=( ${line} )
+                        CURRENT=${#words}
+                        _normal
+                        ret=$?
+                    fi
+                    ;;
+            esac
+            ;;
+    esac
+
+    return ret
+}
+
+_pausectl "$@"
