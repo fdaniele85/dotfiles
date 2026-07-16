@@ -1,0 +1,127 @@
+.TH BIG-FILES 1 "Luglio 2026" "big-files 1.0" "Comandi Utente"
+.SH NOME
+big-files \- mostra i file piu grandi in uno o piu percorsi
+.SH SINTASSI
+.B big-files
+[\fB\-n\fR \fICOUNT\fR]
+[\fIPATH\fR...]
+.br
+.B big-files
+[\fB\-n\fR \fICOUNT\fR]
+.B \-x
+.I CACHE_FILE
+.I PATH
+[\fIPATH\fR...]
+.br
+.B big-files
+.B \-f
+.I CACHE_FILE
+.br
+.B big-files
+[\fB\-h\fR]
+.SH DESCRIZIONE
+.B big-files
+trova i file piu grandi nei percorsi indicati e stampa una lista ordinata per
+dimensione decrescente.
+.PP
+Senza opzioni di cache, il comando analizza direttamente i percorsi passati
+come argomenti. Se non viene indicato alcun percorso, analizza la directory
+corrente.
+.PP
+Con
+.BR \-x ,
+il comando esporta direttamente il report formattato in un file di cache.
+Con
+.BR \-f ,
+il comando stampa quel file senza risortare, riformattare o scansionare il
+filesystem.
+.SH OPZIONI
+.TP
+.BI "\-n " COUNT
+Mostra
+.I COUNT
+file. Il valore predefinito e
+.BR 10 .
+.I COUNT
+deve essere un intero positivo. Si applica alla scansione live e alla creazione
+della cache con
+.BR \-x ,
+non alla lettura con
+.BR \-f .
+.TP
+.BI "\-x " CACHE_FILE
+Esporta il report formattato in
+.I CACHE_FILE
+scansionando i
+.I PATH
+passati dopo le opzioni. Richiede almeno un percorso.
+.TP
+.BI "\-f " CACHE_FILE
+Stampa
+.I CACHE_FILE
+con
+.BR cat (1) .
+Non accetta percorsi aggiuntivi e non puo essere combinato con
+.BR \-n .
+.TP
+.B \-h
+Mostra l'aiuto.
+.SH FORMATO CACHE
+Il formato cache e lo stesso output testuale prodotto dal comando:
+.PP
+.RS
+.nf
+  3.0KB /path/to/file
+.fi
+.RE
+.PP
+La cache e quindi pensata per essere visualizzata rapidamente, non per essere
+riordinata o filtrata in modo diverso al momento della lettura.
+.SH ESEMPI
+Mostrare i 10 file piu grandi nella directory corrente:
+.PP
+.RS
+.nf
+big-files
+.fi
+.RE
+.PP
+Mostrare i 25 file piu grandi in due directory:
+.PP
+.RS
+.nf
+big-files -n 25 ~/Downloads /data/archive
+.fi
+.RE
+.PP
+Creare una cache:
+.PP
+.RS
+.nf
+big-files -n 50 -x /tmp/big-files.cache ~/Downloads /data/archive
+.fi
+.RE
+.PP
+Leggere la cache:
+.PP
+.RS
+.nf
+big-files -f /tmp/big-files.cache
+.fi
+.RE
+.SH STATO DI USCITA
+.TP
+.B 0
+Operazione completata.
+.TP
+.B 64
+Uso non valido, opzione incompatibile, argomento mancante o valore non valido.
+.SH DIPENDENZE
+.BR bash (1),
+.BR cat (1),
+.BR find (1),
+.BR sort (1),
+.BR awk (1),
+.BR numfmt (1)
+.SH AUTORE
+Daniele

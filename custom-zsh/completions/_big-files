@@ -1,0 +1,28 @@
+#compdef big-files
+
+_big_files() {
+    local curcontext="$curcontext" state line ret=1
+
+    _arguments -C -s -S \
+        '(-h -x -f)-h[mostra aiuto]' \
+        '(-f)-n[numero di file da mostrare o salvare in cache]:numero:' \
+        '(-f)-x[esporta una cache scansionando i percorsi]:file cache:_files' \
+        '(-x -n)-f[stampa una cache gia formattata]:file cache:_files' \
+        '*::percorso:->paths' \
+        && ret=0
+
+    case $state in
+        paths)
+            if (( ${line[(Ie)-f]} )); then
+                _message 'nessun percorso aggiuntivo con -f'
+            else
+                _files
+            fi
+            ret=0
+            ;;
+    esac
+
+    return ret
+}
+
+_big_files "$@"

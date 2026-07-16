@@ -1,0 +1,121 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+num_files=10
+count_set=false
+mode="scan"
+cache_file=""
+
+usage() {
+  cat <<'EOF'
+Usage:
+  big-files [-n COUNT] [PATH...]
+  big-files [-n COUNT] -x CACHE_FILE PATH...
+  big-files -f CACHE_FILE
+
+Options:
+  -n COUNT       Show COUNT files. Default: 10.
+  -x CACHE_FILE  Export the formatted report to CACHE_FILE by scanning PATH...
+  -f CACHE_FILE  Print a previously exported CACHE_FILE.
+  -h             Show this help.
+EOF
+}
+
+die() {
+  printf 'big-files: %s\n' "$*" >&2
+  exit 64
+}
+
+validate_count() {
+  [[ "$num_files" =~ ^[1-9][0-9]*$ ]] || die "-n requires a positive integer"
+}
+
+scan_paths() {
+  find "$@" -type f -printf "%s\t%p\n" 2>/dev/null
+}
+
+print_largest() {
+  sort -nr -k1,1 \
+    | awk -v limit="$num_files" 'NR <= limit' \
+    | numfmt --to=iec --suffix=B --padding=7 --field=1
+}
+
+read_cache() {
+  local file="$1"
+
+  [[ -r "$file" ]] || die "cannot read cache file: $file"
+
+  cat -- "$file"
+}
+
+write_cache() {
+  local file="$1"
+  shift
+
+  local cache_dir cache_base tmp
+
+  [[ $# -gt 0 ]] || die "-x requires at least one path to scan"
+
+  cache_dir="$(dirname -- "$file")"
+  cache_base="$(basename -- "$file")"
+  [[ -d "$cache_dir" ]] || die "cache directory does not exist: $cache_dir"
+
+  tmp="$(mktemp "${cache_dir}/${cache_base}.XXXXXX")" || exit 1
+
+  if ! scan_paths "$@" | print_largest > "$tmp"; then
+    rm -f -- "$tmp"
+    exit 1
+  fi
+
+  mv -f -- "$tmp" "$file"
+}
+
+while getopts ":n:x:f:h" opt; do
+  case "$opt" in
+    n)
+      num_files="$OPTARG"
+      count_set=true
+      ;;
+    x)
+      [[ "$mode" == "scan" ]] || die "-x cannot be used with -f"
+      mode="export"
+      cache_file="$OPTARG"
+      ;;
+    f)
+      [[ "$mode" == "scan" ]] || die "-f cannot be used with -x"
+      mode="cache"
+      cache_file="$OPTARG"
+      ;;
+    h)
+      usage
+      exit 0
+      ;;
+    :)
+      die "-$OPTARG requires an argument"
+      ;;
+    \?)
+      usage >&2
+      die "unknown option: -$OPTARG"
+      ;;
+  esac
+done
+shift $((OPTIND - 1))
+
+validate_count
+
+case "$mode" in
+  scan)
+    if [[ $# -eq 0 ]]; then
+      set -- "."
+    fi
+    scan_paths "$@" | print_largest
+    ;;
+  export)
+    write_cache "$cache_file" "$@"
+    ;;
+  cache)
+    [[ "$count_set" == false ]] || die "-n cannot be used with -f; the cache is already formatted"
+    [[ $# -eq 0 ]] || die "-f reads from the cache file only; do not pass paths"
+    read_cache "$cache_file"
+    ;;
+esac
