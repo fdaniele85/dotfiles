@@ -11,6 +11,17 @@ typeset -i DONE=0
 typeset -i FAILED=0
 typeset -i START_TIME=0
 
+usage() {
+  cat <<'EOF'
+Usage: flac-to-mp3 [DIRECTORY...]
+
+Convert every .flac file found directly inside each DIRECTORY to MP3.
+If no directory is given, the current directory is used.
+
+The original FLAC file is removed only after a successful conversion.
+EOF
+}
+
 format_duration() {
   local -i seconds="$1"
   local -i hours minutes
@@ -145,6 +156,13 @@ run_conversion() {
 
 main() {
   local source error_log
+
+  case "${1:-}" in
+    -h|--help)
+      usage
+      return 0
+      ;;
+  esac
 
   collect_sources "$@"
   TOTAL="${#SOURCES[@]}"

@@ -1,0 +1,74 @@
+.TH FLAC-TO-MP3 1 "Luglio 2026" "flac-to-mp3 1.0" "Comandi Utente"
+.SH NOME
+flac-to-mp3 \- converte file FLAC in MP3
+.SH SINTASSI
+.B flac-to-mp3
+[\fIDIRECTORY\fR...]
+.br
+.B flac-to-mp3
+[\fB\-h\fR|\fB\-\-help\fR]
+.SH DESCRIZIONE
+.B flac-to-mp3
+converte in MP3 tutti i file
+.B .flac
+trovati direttamente nelle directory indicate.
+.PP
+Se non viene specificata alcuna directory, viene usata la directory corrente.
+Ogni file viene convertito con
+.BR ffmpeg (1)
+usando qualità variabile massima, copiando i metadati dal file sorgente e
+scrivendo tag ID3 compatibili.
+.PP
+Il file FLAC originale viene eliminato solo se la conversione termina con
+successo. In caso di errore, il file originale viene lasciato al suo posto e
+lo script stampa il percorso del log temporaneo prodotto da
+.BR ffmpeg (1).
+.SH OPZIONI
+.TP
+.BR \-h ", " \-\-help
+Mostra un breve messaggio di aiuto.
+.SH OPERANDI
+.TP
+.I DIRECTORY
+Directory da analizzare. Lo script cerca file
+.B .flac
+solo al primo livello della directory, senza ricorsione.
+.SH VARIABILI D'AMBIENTE
+.TP
+.B PROGRESS_WIDTH
+Larghezza della barra di avanzamento. Il valore predefinito è
+.BR 32 .
+.TP
+.B TMPDIR
+Directory usata per creare il log temporaneo degli errori. Se non impostata,
+viene usata
+.BR /tmp .
+.SH ESEMPI
+Convertire i FLAC nella directory corrente:
+.PP
+.RS
+.nf
+flac-to-mp3
+.fi
+.RE
+.PP
+Convertire i FLAC in due directory:
+.PP
+.RS
+.nf
+flac-to-mp3 Album1 Album2
+.fi
+.RE
+.SH STATO DI USCITA
+.TP
+.B 0
+Nessun file FLAC trovato oppure tutte le conversioni sono riuscite.
+.TP
+.B 1
+Almeno una conversione è fallita, oppure non è stato possibile creare il log
+temporaneo.
+.SH DIPENDENZE
+.BR zsh (1),
+.BR ffmpeg (1)
+.SH AUTORE
+Daniele

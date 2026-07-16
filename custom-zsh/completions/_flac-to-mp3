@@ -1,0 +1,9 @@
+#compdef flac-to-mp3
+
+_flac_to_mp3() {
+    _arguments -s -S \
+        '(-h --help)'{-h,--help}'[mostra aiuto]' \
+        '*:directory:_files -/'
+}
+
+_flac_to_mp3 "$@"
