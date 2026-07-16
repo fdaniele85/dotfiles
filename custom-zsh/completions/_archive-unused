@@ -1,0 +1,11 @@
+#compdef archive-unused
+
+_archive_unused() {
+    _arguments -s -S \
+        '(-h --help)'{-h,--help}'[mostra aiuto]' \
+        '(-d --dry-run)'{-d,--dry-run}'[mostra operazioni senza eseguirle]' \
+        '(-a --archive)'{-a,--archive}'[archivio tar.gz di destinazione]:archivio:_files -g "*.tar.gz(-.)"' \
+        '*:file o directory:_files'
+}
+
+_archive_unused "$@"

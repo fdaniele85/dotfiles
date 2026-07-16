@@ -1,0 +1,136 @@
+#!/usr/bin/env bash
+
+DEFAULT_ARCHIVE="not_used.tar.gz"
+OUT_ARCHIVE=""
+ARCHIVE_PATH=""
+ITEMS=()
+DRY_RUN=false
+
+usage() {
+  cat <<EOF
+Usage: archive-unused [OPTIONS] ITEM...
+
+Archive ITEM... into a tar.gz file, then remove the originals after a
+successful archive write.
+
+Options:
+  -a, --archive FILE  Output archive path. Default: $DEFAULT_ARCHIVE
+  -d, --dry-run       Show planned operations without changing files.
+  -h, --help          Show this help.
+
+Examples:
+  archive-unused --archive backup.tar.gz old-dir old-file.txt
+  archive-unused -d file1.txt dir2/
+EOF
+}
+
+die() {
+  echo "archive-unused: $*" >&2
+  exit 64
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    -d|--dry-run)
+      DRY_RUN=true
+      shift
+      ;;
+    -a|--archive)
+      [[ -n "${2:-}" && "${2:0:1}" != "-" ]] || die "--archive requires a file path"
+      OUT_ARCHIVE="$2"
+      shift 2
+      ;;
+    --*)
+      usage >&2
+      die "unknown option: $1"
+      ;;
+    *)
+      ITEMS+=("$1")
+      shift
+      ;;
+  esac
+done
+
+if [[ -z "$OUT_ARCHIVE" ]]; then
+  OUT_ARCHIVE="$DEFAULT_ARCHIVE"
+fi
+
+if [[ "$OUT_ARCHIVE" != *.tar.gz ]]; then
+  OUT_ARCHIVE="${OUT_ARCHIVE}.tar.gz"
+fi
+
+if [[ "$OUT_ARCHIVE" = /* ]]; then
+  ARCHIVE_PATH="$OUT_ARCHIVE"
+else
+  ARCHIVE_PATH="$PWD/$OUT_ARCHIVE"
+fi
+
+if [ "${#ITEMS[@]}" -eq 0 ]; then
+  usage >&2
+  die "missing ITEM"
+fi
+
+if [ "$DRY_RUN" = true ]; then
+  echo "[*] Dry-run mode: no changes will be applied"
+  if [ -f "$ARCHIVE_PATH" ]; then
+    echo "[*] Existing archive will be updated: $ARCHIVE_PATH"
+  else
+    echo "[*] Archive will be created: $ARCHIVE_PATH"
+  fi
+  echo "[*] Items: ${ITEMS[*]}"
+  exit 0
+fi
+
+TMP_DIR=$(mktemp -d)
+
+if [ -f "$ARCHIVE_PATH" ]; then
+  echo "[*] Extracting existing archive into $TMP_DIR"
+  tar -xzf "$ARCHIVE_PATH" -C "$TMP_DIR" || {
+    echo "archive-unused: extraction failed" >&2
+    rm -rf "$TMP_DIR"
+    exit 1
+  }
+fi
+
+for item in "${ITEMS[@]}"; do
+  if [ ! -e "$item" ]; then
+    echo "archive-unused: not found, skipping: $item" >&2
+    continue
+  fi
+  echo "[*] Adding: $item"
+  if [ -d "$item" ]; then
+    rsync -a --ignore-existing "$item/" "$TMP_DIR/$item/"
+  else
+    target="$TMP_DIR/$item"
+    mkdir -p "$(dirname "$target")"
+    if [ ! -e "$target" ]; then
+      cp "$item" "$target"
+    fi
+  fi
+done
+
+cd "$TMP_DIR"
+tar -czf "$ARCHIVE_PATH" *
+STATUS=$?
+cd - > /dev/null
+
+echo "[*] Cleaning temporary directory"
+rm -rf "$TMP_DIR"
+
+if [ $STATUS -eq 0 ]; then
+  echo "[*] Archive created: $ARCHIVE_PATH"
+  for item in "${ITEMS[@]}"; do
+    if [ -e "$item" ]; then
+      echo "[*] Removing original: $item"
+      rm -rf "$item"
+    fi
+  done
+  echo "[*] Done"
+else
+  echo "archive-unused: archive creation failed; originals kept" >&2
+  exit 2
+fi

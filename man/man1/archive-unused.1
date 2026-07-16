@@ -1,0 +1,99 @@
+.TH ARCHIVE-UNUSED 1 "Luglio 2026" "archive-unused 1.0" "Comandi Utente"
+.SH NOME
+archive-unused \- archivia file o directory non piu usati e rimuove gli originali
+.SH SINTASSI
+.B archive-unused
+[\fB\-d\fR|\fB\-\-dry-run\fR]
+[\fB\-a\fR|\fB\-\-archive\fR \fIFILE\fR]
+.I ITEM
+[\fIITEM\fR...]
+.br
+.B archive-unused
+[\fB\-h\fR|\fB\-\-help\fR]
+.SH DESCRIZIONE
+.B archive-unused
+crea o aggiorna un archivio
+.B tar.gz
+con gli elementi indicati e rimuove gli originali solo se la scrittura
+dell'archivio termina correttamente.
+.PP
+Se l'archivio di destinazione esiste gia, viene estratto in una directory
+temporanea, i nuovi elementi vengono aggiunti senza sovrascrivere file gia
+presenti, e l'archivio viene ricreato.
+.PP
+Il nome predefinito dell'archivio e
+.BR not_used.tar.gz .
+Se il nome passato con
+.B \-\-archive
+non termina con
+.BR .tar.gz ,
+l'estensione viene aggiunta automaticamente.
+.SH OPZIONI
+.TP
+.BR \-a ", " \-\-archive " " \fIFILE\fR
+Percorso dell'archivio da creare o aggiornare. Il valore predefinito e
+.BR not_used.tar.gz .
+.TP
+.BR \-d ", " \-\-dry-run
+Mostra le operazioni previste senza creare archivi e senza rimuovere file.
+.TP
+.BR \-h ", " \-\-help
+Mostra l'aiuto.
+.SH ARGOMENTI
+.TP
+.I ITEM
+File o directory da aggiungere all'archivio. Gli elementi inesistenti vengono
+segnalati e saltati.
+.SH ESEMPI
+Archiviare due elementi in
+.BR not_used.tar.gz :
+.PP
+.RS
+.nf
+archive-unused old-dir old-file.txt
+.fi
+.RE
+.PP
+Usare un archivio specifico:
+.PP
+.RS
+.nf
+archive-unused --archive backup.tar.gz old-dir old-file.txt
+.fi
+.RE
+.PP
+Vedere le operazioni senza applicarle:
+.PP
+.RS
+.nf
+archive-unused --dry-run old-dir old-file.txt
+.fi
+.RE
+.SH STATO DI USCITA
+.TP
+.B 0
+Operazione completata, oppure dry-run mostrato correttamente.
+.TP
+.B 1
+Errore durante l'estrazione di un archivio esistente.
+.TP
+.B 2
+Errore durante la creazione dell'archivio; gli originali vengono conservati.
+.TP
+.B 64
+Uso non valido, opzione sconosciuta o argomento mancante.
+.SH DIPENDENZE
+.BR bash (1),
+.BR tar (1),
+.BR rsync (1),
+.BR cp (1),
+.BR rm (1),
+.BR mktemp (1)
+.SH AVVERTENZE
+Quando non e in dry-run,
+.B archive-unused
+rimuove gli originali dopo la creazione riuscita dell'archivio. Verificare con
+.B \-\-dry-run
+prima di archiviare dati importanti.
+.SH AUTORE
+Daniele
