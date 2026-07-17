@@ -1,25 +1,46 @@
-#! /bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
 
-# Create backup dir 
-DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-DIR=$(echo $DIR | sed 's_/scripts__')
+export ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+BACKUP_DIR="$ROOT_DIR/backups"
+INSTALLERS_DIR="$ROOT_DIR/scripts/installers"
+HOST="$(hostname -s)"
 
-if [[ ! -d "$DIR/backups" ]]
-then
-    echo "Creating backup dir '$DIR/backups'"
-    mkdir "$DIR/backups"
+mkdir -p "$BACKUP_DIR"
+
+if ! command -v stow >/dev/null 2>&1; then
+    echo "stow non trovato. Installo GNU Stow."
+    sudo apt install stow
 fi
 
-# Install programs
-for file in $DIR/scripts/installers/*.sh
-do
-    name=$(basename $file | sed 's/\.sh//')
-    read -p "Do you wish to install '$name'? [y/n] " yn
-    case $yn in
-        [Yy]* )
-	    bash "$file" "$DIR/backups"
-	    ;;
-    esac
-done
+command -v stow >/dev/null 2>&1 || {
+    echo "stow non trovato anche dopo l'installazione." >&2
+    exit 1
+}
 
-bash "$DIR/scripts/link.sh" "$DIR"
+
+run_installers() {
+    local dir="$1"
+    local label="$2"
+
+    [[ -d "$dir" ]] || return 0
+
+    shopt -s nullglob
+    local installers=("$dir"/*.sh)
+    shopt -u nullglob
+
+    (( ${#installers[@]} )) || return 0
+
+    echo "Running ${label} installers"
+    local installer
+    for installer in "${installers[@]}"; do
+        echo "-> $(basename "$installer")"
+        bash "$installer" "$BACKUP_DIR"
+    done
+}
+
+run_installers "$INSTALLERS_DIR/all" "common"
+run_installers "$INSTALLERS_DIR/$HOST" "host '$HOST'"
+
+echo "Linking dotfiles with stow"
+stow -d "$ROOT_DIR/link" -t "$HOME" home
