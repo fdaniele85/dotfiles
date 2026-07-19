@@ -1,0 +1,97 @@
+.TH SPLIT-M4B 1 "Luglio 2026" "split-m4b 1.0" "Comandi Utente"
+.SH NOME
+split-m4b \- divide un audiolibro M4B in file MP3
+.SH SINTASSI
+.B split-m4b
+[\fB\-c\fR|\fB\-\-cue\fR]
+.I M4B_FILE
+.br
+.B split-m4b
+[\fB\-h\fR|\fB\-\-help\fR]
+.SH DESCRIZIONE
+.B split-m4b
+usa
+.BR m4b-tool (1)
+per dividere un audiolibro
+.B M4B
+in file
+.BR MP3 .
+.PP
+Senza
+.BR \-\-cue ,
+lo script esporta i capitoli dal file M4B con
+.B m4b-tool meta --export-chapters
+e pulisce il file
+.IR .chapters.txt
+generato.
+.PP
+Con
+.BR \-\-cue ,
+lo script legge i tempi dei capitoli dal file
+.I M4B_FILE
+con estensione sostituita da
+.BR .cue ,
+e genera un file capitoli con nomi
+.B Chapter NN
+prima di avviare lo split.
+.PP
+Durante la conversione mostra una barra di avanzamento basata sul numero di MP3
+prodotti nella directory di output
+.IR M4B_FILE_splitted .
+.SH OPZIONI
+.TP
+.BR \-c ", " \-\-cue
+Usa il file
+.B .cue
+associato al file M4B per generare i capitoli.
+.TP
+.BR \-h ", " \-\-help
+Mostra l'aiuto.
+.SH FILE
+.TP
+.BI M4B_FILE .chapters.txt
+File dei capitoli generato o aggiornato prima dello split.
+.TP
+.BI M4B_FILE _splitted/
+Directory attesa per gli MP3 prodotti da
+.BR m4b-tool .
+.SH ESEMPI
+Dividere un M4B usando i capitoli interni:
+.PP
+.RS
+.nf
+split-m4b audiobook.m4b
+.fi
+.RE
+.PP
+Dividere usando
+.BR audiobook.cue :
+.PP
+.RS
+.nf
+split-m4b --cue audiobook.m4b
+.fi
+.RE
+.SH STATO DI USCITA
+.TP
+.B 0
+Split completato.
+.TP
+.B 64
+Uso non valido o opzione sconosciuta.
+.TP
+.B 66
+File M4B o CUE non trovato.
+.PP
+Se
+.BR m4b-tool
+fallisce, lo script mostra il log e restituisce il suo codice di uscita.
+.SH DIPENDENZE
+.BR zsh (1),
+.BR php (1),
+.BR m4b-tool (1),
+.BR sponge (1),
+.BR grep (1),
+.BR find (1)
+.SH AUTORE
+Daniele

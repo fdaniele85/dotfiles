@@ -1,0 +1,95 @@
+.TH TAG-BOOKS 1 "Luglio 2026" "tag-books 1.0" "Comandi Utente"
+.SH NOME
+tag-books \- applica tag ID3 a directory di audiolibri MP3
+.SH SINTASSI
+.B tag-books
+[\fB\-r\fR|\fB\-\-rename\fR]
+[\fB\-d\fR|\fB\-\-date\fR \fIDATE\fR]
+.I DIRECTORY
+[\fIDIRECTORY\fR...]
+.br
+.B tag-books
+[\fB\-h\fR|\fB\-\-help\fR]
+.SH DESCRIZIONE
+.B tag-books
+applica tag ID3 ai file
+.B .mp3
+contenuti nelle directory indicate.
+.PP
+Autore e titolo vengono dedotti dal nome della directory. Sono supportati nomi
+nel formato:
+.PP
+.RS
+.nf
+Author - Title
+001 - Author - Title
+.fi
+.RE
+.PP
+Per ogni MP3 lo script imposta numero traccia, titolo e anno/data con
+.BR mid3v2 (1).
+Poi imposta artista, album artist e album con
+.BR eyeD3 (1).
+Se nella directory esiste
+.BR cover.jpg ,
+lo aggiunge come copertina frontale.
+.SH OPZIONI
+.TP
+.BR \-r ", " \-\-rename
+Rinomina gli MP3 prima del tagging usando il titolo della directory e un numero
+progressivo.
+.TP
+.BR \-d ", " \-\-date " " \fIDATE\fR
+Data base passata a
+.BR "date -d" .
+Il valore predefinito e
+.BR today .
+Ogni traccia usa la data base piu un giorno progressivo.
+.TP
+.BR \-h ", " \-\-help
+Mostra l'aiuto.
+.SH ARGOMENTI
+.TP
+.I DIRECTORY
+Directory contenente file
+.B .mp3
+da taggare.
+.SH ESEMPI
+Taggare una directory:
+.PP
+.RS
+.nf
+tag-books "Author - Title"
+.fi
+.RE
+.PP
+Rinominare gli MP3 prima del tagging:
+.PP
+.RS
+.nf
+tag-books --rename "001 - Author - Title"
+.fi
+.RE
+.PP
+Usare una data base specifica:
+.PP
+.RS
+.nf
+tag-books --date 2026-07-19 "Author - Title"
+.fi
+.RE
+.SH STATO DI USCITA
+.TP
+.B 0
+Operazione completata.
+.TP
+.B 64
+Uso non valido, opzione sconosciuta o argomento mancante.
+.SH DIPENDENZE
+.BR zsh (1),
+.BR mid3v2 (1),
+.BR eyeD3 (1),
+.BR date (1),
+.BR sed (1)
+.SH AUTORE
+Daniele

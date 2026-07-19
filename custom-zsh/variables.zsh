@@ -23,4 +23,8 @@ if [[ -d /home/daniele/.local/bin/ ]]; then
     export PATH="$PATH:/home/daniele/.local/bin/"
 fi
 
+if [[ -d /home/daniele/.lmstudio/bin/ ]]; then
+    export PATH="/home/daniele/.lmstudio/bin:$PATH"
+fi
+
 export MANPATH="$HOME/.dotfiles/man:$MANPATH"

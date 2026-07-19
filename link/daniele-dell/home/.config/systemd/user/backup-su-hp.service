@@ -1,0 +1,9 @@
+[Unit]
+Description=Backup su HP via Borg
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecCondition=/home/daniele/.dotfiles/bin/connected-to-hp.sh
+ExecStart=/home/daniele/.dotfiles/bin/pausectl run borg -- /home/daniele/.local/bin/backup-su-hp.sh
+Environment=LOG_FILE=/home/daniele/.local/share/logs/hp.log

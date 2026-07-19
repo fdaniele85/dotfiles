@@ -1,0 +1,10 @@
+#compdef split-m4b
+
+_split_m4b() {
+    _arguments -s -S \
+        '(-h --help)'{-h,--help}'[mostra aiuto]' \
+        '(-c --cue)'{-c,--cue}'[legge i capitoli dal file cue associato]' \
+        '1:file m4b:_files -g "*.(m4b|M4B)(-.)"'
+}
+
+_split_m4b "$@"

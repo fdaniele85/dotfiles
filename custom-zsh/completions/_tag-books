@@ -1,0 +1,11 @@
+#compdef tag-books
+
+_tag_books() {
+    _arguments -s -S \
+        '(-h --help)'{-h,--help}'[mostra aiuto]' \
+        '(-r --rename)'{-r,--rename}'[rinomina gli mp3 prima del tagging]' \
+        '(-d --date)'{-d,--date}'[data base per GNU date]:data:' \
+        '*:directory:_files -/'
+}
+
+_tag_books "$@"

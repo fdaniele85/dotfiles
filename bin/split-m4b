@@ -1,0 +1,141 @@
+#!/usr/bin/env zsh
+
+usage() {
+	cat <<'EOF'
+Usage: split-m4b [-c|--cue] M4B_FILE
+
+Split an M4B audiobook into MP3 files using m4b-tool.
+
+Options:
+  -c, --cue   Read chapter times from a matching .cue file.
+  -h, --help  Show this help.
+EOF
+}
+
+convertsecs() {
+	((h=${1}/3600))
+	((m=(${1}%3600)/60))
+	((s=${1}%60))
+	printf "%02d:%02d:%02d\n" $h $m $s
+}
+
+progressbar() {
+	local current=$1 total=$2 elapsed=$3 width=30
+	local percent filled
+
+	if (( total > 0 )); then
+		percent=$(( current * 100 / total ))
+		filled=$(( width * current / total ))
+	else
+		percent=0
+		filled=0
+	fi
+
+	(( filled > width )) && filled=$width
+	local empty=$(( width - filled ))
+	local bar=""
+	local i
+	for ((i=0;i<filled;i++)); do bar+="#"; done
+	for ((i=0;i<empty;i++)); do bar+="-"; done
+
+	local eta=0
+	if (( current > 0 )); then
+		eta=$(( elapsed * (total - current) / current ))
+	fi
+
+	printf "\r[%s] %3d%% (%d/%d)  elapsed %s  eta %s" \
+		"$bar" "$percent" "$current" "$total" \
+		"$(convertsecs $elapsed)" "$(convertsecs $eta)"
+}
+
+use_cue=false
+
+while [[ $# -gt 0 ]]; do
+	case "$1" in
+		-c|--cue)
+			use_cue=true
+			shift
+			;;
+		-h|--help)
+			usage
+			exit 0
+			;;
+		--)
+			shift
+			break
+			;;
+		-*)
+			print -u2 -- "split-m4b: unknown option: $1"
+			usage >&2
+			exit 64
+			;;
+		*)
+			break
+			;;
+	esac
+done
+
+if (( $# != 1 )); then
+	usage >&2
+	exit 64
+fi
+
+file="$1"
+if [[ ! -f "$file" ]]; then
+	print -u2 -- "split-m4b: file not found: $file"
+	exit 66
+fi
+
+print -- "$file"
+chap="${file:r}.chapters.txt"
+
+if [[ "$use_cue" == false ]]; then
+	php "$HOME/.dotfiles/bin/m4b-tool-nuovo.phar" meta "$file" --export-chapters
+	grep -v "^#" "$chap" | sponge "$chap"
+else
+	cue_file="${file:r}.cue"
+	if [[ ! -f "$cue_file" ]]; then
+		print -u2 -- "split-m4b: cue file not found: $cue_file"
+		exit 66
+	fi
+
+	i=1
+	grep INDEX "$cue_file" | sed 's/[[:space:]]*$//' | cut -d' ' -f5 | while read -r line; do
+		min=$(echo "$line" | cut -d: -f1)
+		sec=$(echo "$line" | cut -d: -f2)
+		out=$(convertsecs $((min * 60 + sec)))
+		printf "%s Chapter %02d\n" "$out" "$i"
+		((i++))
+	done > "$chap"
+fi
+
+total=$(wc -l < "$chap")
+outdir="${file:r}_splitted"
+
+logfile=$(mktemp)
+trap 'rm -f "$logfile"' EXIT
+
+php "$HOME/.dotfiles/bin/m4b-tool.phar" split --audio-format mp3 --audio-bitrate 256k \
+	--audio-channels 2 --audio-samplerate 44100 "$file" > "$logfile" 2>&1 &
+pid=$!
+
+start=$SECONDS
+
+while kill -0 $pid 2>/dev/null; do
+	count=$(find "$outdir" -type f -iname "*.mp3" 2>/dev/null | wc -l)
+	progressbar $count $total $((SECONDS - start))
+	sleep 0.5
+done
+
+wait $pid
+rc=$?
+
+count=$(find "$outdir" -type f -iname "*.mp3" 2>/dev/null | wc -l)
+progressbar $count $total $((SECONDS - start))
+echo
+
+if [[ $rc -ne 0 ]]; then
+	echo "m4b-tool failed, log:" >&2
+	cat "$logfile"
+	exit "$rc"
+fi

@@ -1,0 +1,9 @@
+[Unit]
+Description=Timer orario per backup su HP
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1h
+
+[Install]
+WantedBy=timers.target

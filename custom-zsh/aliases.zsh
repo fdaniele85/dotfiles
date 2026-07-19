@@ -71,3 +71,5 @@ tarzst() {
 }
 
 alias trasferisci='rsync -a --partial --info=progress2 --no-i-r'
+alias cmd='sgpt --shell'
+alias compress-7z='7z a -mx=9 -mmt=on -ms=on -m0=lzma2 -mfb=64 -md=32m'
