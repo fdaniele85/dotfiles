@@ -1,0 +1,123 @@
+.TH MERGE-MP3 1 "Luglio 2026" "merge-mp3 1.0" "Comandi Utente"
+.SH NOME
+merge-mp3 \- unisce tracce MP3 in parti piu lunghe
+.SH SINTASSI
+.B merge-mp3
+[\fB\-\-output-prefix\fR \fIPREFIX\fR]
+[\fB\-\-start-date\fR \fIDATE\fR]
+[\fB\-\-dry-run\fR]
+.I INPUT_DIR
+.I MAX_MINUTES
+.br
+.B merge-mp3
+[\fB\-h\fR|\fB\-\-help\fR]
+.SH DESCRIZIONE
+.B merge-mp3
+legge i file
+.B .mp3
+contenuti in
+.I INPUT_DIR
+e li unisce in file MP3 piu lunghi, cercando di mantenere ogni output entro
+.I MAX_MINUTES
+minuti.
+.PP
+Tra due tracce consecutive viene inserito un silenzio di due secondi. Se una
+singola traccia supera
+.IR MAX_MINUTES ,
+viene copiata in un output dedicato.
+.PP
+La directory di input deve avere un nome nel formato:
+.PP
+.RS
+.nf
+Artist - Title
+.fi
+.RE
+.PP
+Il nome viene usato per impostare artista e album nei tag ID3. Se nella
+directory esiste
+.BR cover.jpg ,
+viene aggiunta come copertina frontale.
+.PP
+Al termine, quando non e in dry-run, i file MP3 originali vengono spostati in
+.BR originali_backup/
+con suffisso
+.BR .bak .
+.SH OPZIONI
+.TP
+.BI "\-\-output-prefix " PREFIX
+Prefisso per i file generati. Se non indicato, viene usato il titolo dedotto
+dal nome della directory.
+.TP
+.BI "\-\-start-date " DATE
+Data iniziale per i tag ID3. Ogni output successivo usa il giorno seguente.
+Il valore predefinito e la data corrente.
+.TP
+.B \-\-dry-run
+Mostra le operazioni previste senza creare output, senza taggare file e senza
+spostare gli originali.
+.TP
+.BR \-h ", " \-\-help
+Mostra l'aiuto.
+.SH ARGOMENTI
+.TP
+.I INPUT_DIR
+Directory contenente file
+.B .mp3
+e opzionalmente
+.BR cover.jpg .
+.TP
+.I MAX_MINUTES
+Durata massima indicativa, in minuti, di ogni file MP3 generato.
+.SH ESEMPI
+Unire gli MP3 in parti da circa 60 minuti:
+.PP
+.RS
+.nf
+merge-mp3 "Author - Book Title" 60
+.fi
+.RE
+.PP
+Usare un prefisso specifico:
+.PP
+.RS
+.nf
+merge-mp3 --output-prefix Book "Author - Book Title" 45
+.fi
+.RE
+.PP
+Vedere le operazioni senza scrivere file:
+.PP
+.RS
+.nf
+merge-mp3 --dry-run "Author - Book Title" 60
+.fi
+.RE
+.SH STATO DI USCITA
+.TP
+.B 0
+Operazione completata.
+.TP
+.B 64
+Uso non valido, opzione sconosciuta o valore non valido.
+.TP
+.B 66
+Directory non trovata oppure nessun file MP3 presente.
+.PP
+Errori da
+.BR ffmpeg (1),
+.BR ffprobe (1),
+.BR mid3v2 (1)
+o
+.BR eyeD3 (1)
+interrompono lo script con il relativo codice di uscita.
+.SH DIPENDENZE
+.BR zsh (1),
+.BR ffmpeg (1),
+.BR ffprobe (1),
+.BR mid3v2 (1),
+.BR eyeD3 (1),
+.BR date (1),
+.BR awk (1)
+.SH AUTORE
+Daniele

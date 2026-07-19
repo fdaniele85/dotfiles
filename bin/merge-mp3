@@ -1,0 +1,275 @@
+#!/usr/bin/env zsh
+
+set -e
+
+usage() {
+  cat <<'EOF'
+Usage: merge-mp3 [OPTIONS] INPUT_DIR MAX_MINUTES
+
+Merge MP3 files from INPUT_DIR into larger MP3 files, each capped at
+approximately MAX_MINUTES minutes.
+
+Options:
+  --output-prefix PREFIX  Output filename prefix. Default: title from INPUT_DIR.
+  --start-date DATE       Initial date for ID3 year/date tags. Default: today.
+  --dry-run               Show planned operations without writing output files.
+  -h, --help              Show this help.
+
+INPUT_DIR must be named like:
+  Artist - Title
+EOF
+}
+
+die() {
+  print -u2 -- "merge-mp3: $*"
+  exit 64
+}
+
+typeset -a TRAPPED_FILES
+typeset -a TMP_FILES_TO_DELETE
+
+cleanup_on_exit() {
+  local tmpf
+
+  for tmpf in "${TMP_FILES_TO_DELETE[@]}"; do
+    if [[ -f "$tmpf" ]]; then
+      rm -f -- "$tmpf"
+    fi
+  done
+}
+
+cleanup_on_interrupt() {
+  local f
+
+  for f in "${TRAPPED_FILES[@]}"; do
+    if [[ -f "$f" ]]; then
+      rm -f -- "$f"
+      print -- "Removed partial output: $f"
+    fi
+  done
+  cleanup_on_exit
+  exit 130
+}
+
+trap cleanup_on_interrupt INT
+trap cleanup_on_exit EXIT
+
+START_DATE="$(date +%F)"
+DRY_RUN=false
+OUTPUT_PREFIX=""
+typeset -a POSITIONAL
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --dry-run)
+      DRY_RUN=true
+      shift
+      ;;
+    --output-prefix)
+      [[ -n "${2:-}" && "${2:0:1}" != "-" ]] || die "--output-prefix requires a value"
+      OUTPUT_PREFIX="$2"
+      shift 2
+      ;;
+    --output-prefix=*)
+      OUTPUT_PREFIX="${1#--output-prefix=}"
+      [[ -n "$OUTPUT_PREFIX" ]] || die "--output-prefix requires a value"
+      shift
+      ;;
+    --start-date)
+      [[ -n "${2:-}" && "${2:0:1}" != "-" ]] || die "--start-date requires a value"
+      START_DATE="$2"
+      shift 2
+      ;;
+    --start-date=*)
+      START_DATE="${1#--start-date=}"
+      [[ -n "$START_DATE" ]] || die "--start-date requires a value"
+      shift
+      ;;
+    --)
+      shift
+      POSITIONAL+=("$@")
+      break
+      ;;
+    -*)
+      usage >&2
+      die "unknown option: $1"
+      ;;
+    *)
+      POSITIONAL+=("$1")
+      shift
+      ;;
+  esac
+done
+
+if (( ${#POSITIONAL} != 2 )); then
+  usage >&2
+  exit 64
+fi
+
+INPUT_DIR="$POSITIONAL[1]"
+MAX_MINUTES="$POSITIONAL[2]"
+
+[[ -d "$INPUT_DIR" ]] || {
+  print -u2 -- "merge-mp3: directory not found: $INPUT_DIR"
+  exit 66
+}
+
+if ! [[ "$MAX_MINUTES" =~ '^[0-9]+$' ]] || (( MAX_MINUTES <= 0 )); then
+  die "MAX_MINUTES must be a positive integer"
+fi
+
+INPUT_DIR="${INPUT_DIR:A}"
+BASENAME="$(basename "$INPUT_DIR")"
+if [[ "$BASENAME" != *" - "* ]]; then
+  die "INPUT_DIR must be named like 'Artist - Title'"
+fi
+
+ARTIST="${BASENAME%% - *}"
+TITLE="${BASENAME##* - }"
+[[ -z "$OUTPUT_PREFIX" ]] && OUTPUT_PREFIX="$TITLE"
+
+COVER="$INPUT_DIR/cover.jpg"
+
+cd "$INPUT_DIR"
+
+MAX_MS=$((MAX_MINUTES * 60 * 1000))
+
+typeset -a MP3_FILES
+MP3_FILES=( *.mp3(N) )
+MP3_FILES=(${(on)MP3_FILES})
+
+if (( ${#MP3_FILES} == 0 )); then
+  print -u2 -- "merge-mp3: no MP3 files found in: $INPUT_DIR"
+  exit 66
+fi
+
+SILENCE_FILE="__silence_2s.mp3"
+if [[ "$DRY_RUN" == false ]]; then
+  ffmpeg -f lavfi -i anullsrc=r=44100:cl=stereo -t 2 -q:a 9 \
+    -acodec libmp3lame "$SILENCE_FILE" -y -loglevel quiet
+fi
+TMP_FILES_TO_DELETE+=("$SILENCE_FILE")
+
+INDEX=1
+TMP_LIST="__concat_list.txt"
+TMP_MERGE="__merged_output.mp3"
+CURRENT_DATE="$START_DATE"
+
+: > "$TMP_LIST"
+TMP_FILES_TO_DELETE+=("$TMP_LIST" "$TMP_MERGE")
+
+CURRENT_DURATION=0
+
+tag_output() {
+  local outfile="$1"
+  local index="$2"
+  local date="$3"
+
+  mid3v2 -a "$ARTIST" -A "$TITLE" -t "$outfile" -T "$index" -y "$date" "$outfile"
+  if [[ -f "$COVER" ]]; then
+    eyeD3 --add-image "$COVER":FRONT_COVER "$outfile" > /dev/null
+  fi
+
+  return 0
+}
+
+advance_output_state() {
+  CURRENT_DATE="$(date -I -d "$CURRENT_DATE + 1 day")"
+  INDEX=$((INDEX + 1))
+  : > "$TMP_LIST"
+  CURRENT_DURATION=0
+}
+
+export_current_batch() {
+  local outfile="${OUTPUT_PREFIX}_$(printf "%02d" "$INDEX").mp3"
+  local duration_ms="$1"
+  local duration_min=$(((duration_ms + 500) / 1000 / 60))
+
+  if [[ "$DRY_RUN" == false ]]; then
+    ffmpeg -f concat -safe 0 -i "$TMP_LIST" -c copy "$TMP_MERGE" -loglevel quiet
+    mv "$TMP_MERGE" "$outfile"
+    tag_output "$outfile" "$INDEX" "$CURRENT_DATE"
+  fi
+
+  printf "\rExported %s (%d min)\n" "$outfile" "$duration_min"
+  TRAPPED_FILES+=("$outfile")
+  advance_output_state
+}
+
+export_single_file() {
+  local input_file="$1"
+  local duration_ms="$2"
+  local outfile="${OUTPUT_PREFIX}_$(printf "%02d" "$INDEX").mp3"
+  local duration_min=$(((duration_ms + 500) / 1000 / 60))
+
+  if [[ "$DRY_RUN" == false ]]; then
+    cp "$input_file" "$outfile"
+    tag_output "$outfile" "$INDEX" "$CURRENT_DATE"
+  fi
+
+  printf "\rExported %s (single file > max time, %d min)\n" "$outfile" "$duration_min"
+  TRAPPED_FILES+=("$outfile")
+  CURRENT_DATE="$(date -I -d "$CURRENT_DATE + 1 day")"
+  INDEX=$((INDEX + 1))
+}
+
+TOTAL_FILES=${#MP3_FILES[@]}
+i=1
+print -n "\nReading MP3 files...\n"
+
+for f in "${MP3_FILES[@]}"; do
+  DUR_MS=$(ffprobe -v error -show_entries format=duration \
+    -of default=noprint_wrappers=1:nokey=1 "$f" |
+    awk '{printf("%d", $1 * 1000)}')
+
+  print -n "\r[$i/$TOTAL_FILES] $f"
+  ((i++))
+
+  if (( DUR_MS > MAX_MS )); then
+    if (( CURRENT_DURATION > 0 )); then
+      export_current_batch "$CURRENT_DURATION"
+    fi
+
+    export_single_file "$f" "$DUR_MS"
+    continue
+  fi
+
+  ADD_DURATION=$DUR_MS
+  if (( CURRENT_DURATION > 0 )); then
+    ADD_DURATION=$((ADD_DURATION + 2000))
+  fi
+
+  if (( CURRENT_DURATION + ADD_DURATION > MAX_MS )); then
+    export_current_batch "$CURRENT_DURATION"
+  fi
+
+  if (( CURRENT_DURATION > 0 )); then
+    print -r -- "file '$SILENCE_FILE'" >> "$TMP_LIST"
+    CURRENT_DURATION=$((CURRENT_DURATION + 2000))
+  fi
+
+  print -r -- "file '$f'" >> "$TMP_LIST"
+  CURRENT_DURATION=$((CURRENT_DURATION + DUR_MS))
+done
+
+if (( CURRENT_DURATION > 0 )); then
+  export_current_batch "$CURRENT_DURATION"
+fi
+
+if [[ "$DRY_RUN" == false ]]; then
+  mkdir -p originali_backup
+  for f in "${MP3_FILES[@]}"; do
+    mv "$f" "originali_backup/$f.bak"
+  done
+else
+  for f in "${MP3_FILES[@]}"; do
+    print -- "[DRY-RUN] $f -> originali_backup/$f.bak"
+  done
+fi
+
+cleanup_on_exit
+print "\nCompleted."
