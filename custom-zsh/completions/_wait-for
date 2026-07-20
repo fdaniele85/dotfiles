@@ -1,11 +1,11 @@
-#compdef poweroff-after
+#compdef wait-for
 
-_poweroff_after() {
+_wait_for() {
     local curcontext="$curcontext" state line ret=1
 
     _arguments -C -s -S \
         '(-h --help)'{-h,--help}'[mostra aiuto]' \
-        '-s[intervallo di polling in secondi]:secondi:' \
+        '(-s --sleep)'{-s,--sleep}'[intervallo di polling in secondi]:secondi:' \
         '*::pattern comando:->command' \
         && ret=0
 
@@ -26,4 +26,4 @@ _poweroff_after() {
     return ret
 }
 
-_poweroff_after "$@"
+_wait_for "$@"

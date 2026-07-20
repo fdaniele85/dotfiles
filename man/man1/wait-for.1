@@ -1,19 +1,17 @@
-.TH POWEROFF-AFTER 1 "Luglio 2026" "poweroff-after 1.0" "Comandi Utente"
+.TH WAIT-FOR 1 "Luglio 2026" "wait-for 1.0" "Comandi Utente"
 .SH NOME
-poweroff-after \- spegne il sistema dopo la fine di un processo
+wait-for \- attende la fine di processi corrispondenti a un pattern
 .SH SINTASSI
-.B poweroff-after
-[\fB\-s\fR \fISECONDS\fR]
+.B wait-for
+[\fB\-s\fR|\fB\-\-sleep\fR \fISECONDS\fR]
 .I COMMAND_PATTERN
 .br
-.B poweroff-after
+.B wait-for
 [\fB\-h\fR|\fB\-\-help\fR]
 .SH DESCRIZIONE
-.B poweroff-after
+.B wait-for
 attende finche non terminano i processi che corrispondono a
-.IR COMMAND_PATTERN ,
-poi esegue
-.BR poweroff (8).
+.IR COMMAND_PATTERN .
 .PP
 La ricerca dei processi usa
 .BR pgrep (1)
@@ -27,7 +25,7 @@ Lo script ignora se stesso e il processo
 usato per la ricerca.
 .SH OPZIONI
 .TP
-.BI "\-s " SECONDS
+.BR \-s ", " \-\-sleep " " \fISECONDS\fR
 Intervallo di polling in secondi. Il valore predefinito e
 .BR 30 .
 .I SECONDS
@@ -42,13 +40,22 @@ Pattern passato a
 .BR "pgrep -f" .
 Usare quoting della shell se il pattern contiene spazi o caratteri speciali.
 .SH ESEMPI
-Spegnere il sistema quando non ci sono piu processi
-.B rsync
-in esecuzione:
+Attendere la fine di
+.BR rsync :
 .PP
 .RS
 .nf
-poweroff-after rsync
+wait-for rsync
+.fi
+.RE
+.PP
+Eseguire un comando quando
+.B rsync
+termina:
+.PP
+.RS
+.nf
+wait-for rsync && poweroff
 .fi
 .RE
 .PP
@@ -56,41 +63,24 @@ Controllare ogni 10 secondi:
 .PP
 .RS
 .nf
-poweroff-after -s 10 ffmpeg
-.fi
-.RE
-.PP
-Usare un pattern piu specifico:
-.PP
-.RS
-.nf
-poweroff-after 'rsync .* /mnt/backup'
+wait-for --sleep 10 ffmpeg
 .fi
 .RE
 .SH STATO DI USCITA
 .TP
 .B 0
-Il processo monitorato e terminato e
-.BR poweroff (8)
-e stato eseguito.
+Almeno un processo corrispondente era in esecuzione all'avvio ed e terminato.
 .TP
 .B 2
 Nessun processo corrispondente era in esecuzione all'avvio.
 .TP
 .B 64
 Uso non valido, argomento mancante o valore di
-.B \-s
+.B \-\-sleep
 non valido.
 .SH DIPENDENZE
 .BR zsh (1),
 .BR pgrep (1),
-.BR ps (1),
-.BR poweroff (8)
-.SH AVVERTENZE
-.B poweroff-after
-esegue davvero
-.BR poweroff (8)
-quando il pattern non corrisponde piu ad alcun processo. Verificare il pattern
-prima di usarlo su sistemi condivisi o remoti.
+.BR ps (1)
 .SH AUTORE
 Daniele

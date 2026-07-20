@@ -1,0 +1,99 @@
+#!/usr/bin/env zsh
+
+usage() {
+	cat <<'EOF'
+Usage: wait-for [-s|--sleep SECONDS] COMMAND_PATTERN
+
+Wait until processes matching COMMAND_PATTERN finish.
+
+Options:
+  -s, --sleep SECONDS  Poll interval in seconds. Default: 30.
+  -h, --help           Show this help.
+EOF
+}
+
+format_duration() {
+	((h=${1}/3600))
+	((m=(${1}%3600)/60))
+	((s=${1}%60))
+	printf "%02d:%02d:%02d\n" $h $m $s
+}
+
+SELF=$$
+SCRIPT_NAME="${0:t}"
+SLEEP_SECONDS=30
+
+matching_pids() {
+	local pattern="$1"
+	local pid
+	local comm
+	local args
+
+	for pid in ${(f)"$(pgrep -f -- "$pattern")"}; do
+		[[ -z "$pid" || "$pid" = "$SELF" ]] && continue
+		comm=$(ps -p "$pid" -o comm= 2>/dev/null) || continue
+		args=$(ps -p "$pid" -o args= 2>/dev/null) || continue
+		[[ "$comm" = "pgrep" ]] && continue
+		[[ "$args" == *"$SCRIPT_NAME"* ]] && continue
+		print "$pid $args"
+	done
+}
+
+while [[ $# -gt 0 ]]; do
+	case "$1" in
+		-s|--sleep)
+			if [[ -z "${2:-}" || "${2:0:1}" = "-" ]]; then
+				print -u2 -- "wait-for: --sleep requires a value"
+				exit 64
+			fi
+			SLEEP_SECONDS="$2"
+			shift 2
+			;;
+		-h|--help)
+			usage
+			exit 0
+			;;
+		--)
+			shift
+			break
+			;;
+		-*)
+			print -u2 -- "wait-for: unknown option: $1"
+			usage >&2
+			exit 64
+			;;
+		*)
+			break
+			;;
+	esac
+done
+
+if (( $# != 1 )); then
+	print -u2 -- "wait-for: missing COMMAND_PATTERN"
+	usage >&2
+	exit 64
+fi
+
+if ! [[ "$SLEEP_SECONDS" =~ '^[0-9]+$' ]] || (( SLEEP_SECONDS <= 0 )); then
+	print -u2 -- "wait-for: invalid --sleep value: $SLEEP_SECONDS"
+	exit 64
+fi
+
+pattern="$1"
+
+if [[ -z "$(matching_pids "$pattern")" ]]; then
+	print -- "No matching process is running."
+	exit 2
+fi
+
+start_time=$(date +%s)
+while true; do
+	pids="$(matching_pids "$pattern")"
+	[[ -z "$pids" ]] && break
+	now=$(date +%s)
+	elapsed=$((now - start_time))
+	print -n "\rWaiting for $pattern to finish: $(format_duration $elapsed)"
+	sleep "$SLEEP_SECONDS"
+done
+
+print "\nFinished."
