@@ -31,6 +31,21 @@ usage() {
     exit 1
 }
 
+format_elapsed() {
+    local total_seconds="$1"
+    local hours=$((total_seconds / 3600))
+    local minutes=$(((total_seconds % 3600) / 60))
+    local seconds=$((total_seconds % 60))
+
+    if (( hours > 0 )); then
+        printf '%d:%02d:%02d' "$hours" "$minutes" "$seconds"
+    elif (( minutes > 0 )); then
+        printf '%d:%02d' "$minutes" "$seconds"
+    else
+        printf '%d' "$seconds"
+    fi
+}
+
 while getopts ":l:h" opt; do
     case $opt in
         l) label="$OPTARG" ;;
@@ -56,12 +71,13 @@ telegram-send "🚀 Avvio: $label"
 start_ts=$(date +%s)
 "${cmd[@]}"
 status=$?
-elapsed=$(( $(date +%s) - start_ts ))
+elapsed_seconds=$(( $(date +%s) - start_ts ))
+elapsed="$(format_elapsed "$elapsed_seconds")"
 
 if [[ $status -eq 0 ]]; then
-    telegram-send "✅ Completato: $label (in ${elapsed}s)"
+    telegram-send "✅ Completato: $label (in $elapsed)"
 else
-    telegram-send "❌ Fallito: $label (exit $status, dopo ${elapsed}s)"
+    telegram-send "❌ Fallito: $label (exit $status, dopo $elapsed)"
 fi
 
 exit "$status"
