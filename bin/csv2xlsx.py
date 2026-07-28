@@ -21,7 +21,6 @@ out=args.output.replace(".xlsx","")
 writer = pd.ExcelWriter(out+'.xlsx', engine='xlsxwriter', engine_kwargs={"options": {'strings_to_numbers': True}})
 for file in args.inputs:
 	try:
-		df = pd.read_csv(file)
 		f=os.path.basename(file).replace(".csv","")
 		with open(file, 'r') as q:
 			reader = csv.reader(q)
@@ -29,7 +28,14 @@ for file in args.inputs:
 				header = row
 				break
 
+		# Preserve the first column as text. It commonly contains instance names,
+		# and XlsxWriter otherwise treats underscores as valid numeric separators.
+		df = pd.read_csv(file, converters={0: str})
 		df.to_excel(writer, sheet_name=f, index=False, header=header, float_format = "%0.2f")
+		worksheet = writer.sheets[f]
+		text_format = writer.book.add_format({'num_format': '@'})
+		for row, value in enumerate(df.iloc[:, 0], start=1):
+			worksheet.write_string(row, 0, value, text_format)
 		if args.delete:
 			os.remove(file)
 	except Exception as e:
