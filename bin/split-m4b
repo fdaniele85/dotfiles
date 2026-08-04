@@ -1,28 +1,23 @@
 #!/usr/bin/env zsh
-
 usage() {
 	cat <<'EOF'
-Usage: split-m4b [-c|--cue] M4B_FILE
-
-Split an M4B audiobook into MP3 files using m4b-tool.
-
+Usage: split-m4b [-c|--cue] [-a|--accurate] M4B_FILE
+Split an M4B audiobook into M4A files without re-encoding (stream copy).
 Options:
-  -c, --cue   Read chapter times from a matching .cue file.
-  -h, --help  Show this help.
+  -c, --cue       Read chapter times from a matching .cue file.
+  -a, --accurate  Frame-accurate cuts (output-side seek, a bit slower).
+  -h, --help      Show this help.
 EOF
 }
-
 convertsecs() {
 	((h=${1}/3600))
 	((m=(${1}%3600)/60))
 	((s=${1}%60))
 	printf "%02d:%02d:%02d\n" $h $m $s
 }
-
 progressbar() {
 	local current=$1 total=$2 elapsed=$3 width=30
 	local percent filled
-
 	if (( total > 0 )); then
 		percent=$(( current * 100 / total ))
 		filled=$(( width * current / total ))
@@ -30,30 +25,31 @@ progressbar() {
 		percent=0
 		filled=0
 	fi
-
 	(( filled > width )) && filled=$width
 	local empty=$(( width - filled ))
 	local bar=""
 	local i
 	for ((i=0;i<filled;i++)); do bar+="#"; done
 	for ((i=0;i<empty;i++)); do bar+="-"; done
-
 	local eta=0
 	if (( current > 0 )); then
 		eta=$(( elapsed * (total - current) / current ))
 	fi
-
 	printf "\r[%s] %3d%% (%d/%d)  elapsed %s  eta %s" \
 		"$bar" "$percent" "$current" "$total" \
 		"$(convertsecs $elapsed)" "$(convertsecs $eta)"
 }
 
 use_cue=false
-
+accurate=false
 while [[ $# -gt 0 ]]; do
 	case "$1" in
 		-c|--cue)
 			use_cue=true
+			shift
+			;;
+		-a|--accurate)
+			accurate=true
 			shift
 			;;
 		-h|--help)
@@ -74,16 +70,18 @@ while [[ $# -gt 0 ]]; do
 			;;
 	esac
 done
-
 if (( $# != 1 )); then
 	usage >&2
 	exit 64
 fi
-
 file="$1"
 if [[ ! -f "$file" ]]; then
 	print -u2 -- "split-m4b: file not found: $file"
 	exit 66
+fi
+if ! command -v ffmpeg >/dev/null; then
+	print -u2 -- "split-m4b: ffmpeg not found in PATH"
+	exit 69
 fi
 
 print -- "$file"
@@ -98,7 +96,6 @@ else
 		print -u2 -- "split-m4b: cue file not found: $cue_file"
 		exit 66
 	fi
-
 	i=1
 	grep INDEX "$cue_file" | sed 's/[[:space:]]*$//' | cut -d' ' -f5 | while read -r line; do
 		min=$(echo "$line" | cut -d: -f1)
@@ -110,32 +107,84 @@ else
 fi
 
 total=$(wc -l < "$chap")
-outdir="${file:r}_splitted"
+if (( total == 0 )); then
+	print -u2 -- "split-m4b: no chapters found in $chap"
+	exit 65
+fi
 
+outdir="${file:r}_splitted"
+mkdir -p "$outdir"
 logfile=$(mktemp)
 trap 'rm -f "$logfile"' EXIT
 
-php "$HOME/.dotfiles/bin/m4b-tool.phar" split --audio-format mp3 --audio-bitrate 256k \
-	--audio-channels 2 --audio-samplerate 44100 "$file" > "$logfile" 2>&1 &
+# Parse chapter start times (seconds) and titles from $chap
+# Format: HH:MM:SS Chapter title...
+typeset -a starts
+typeset -a titles
+while IFS= read -r line; do
+	ts="${line%% *}"
+	title="${line#* }"
+	hh="${ts%%:*}"
+	rest="${ts#*:}"
+	mm="${rest%%:*}"
+	ss="${rest#*:}"
+	ss="${ss%%.*}"   # scarta eventuali millisecondi (es. m4b-tool esporta HH:MM:SS.mmm)
+	starts+=( $((10#$hh*3600 + 10#$mm*60 + 10#$ss)) )
+	titles+=( "$title" )
+done < "$chap"
+
+n=${#starts[@]}
+start_time=$SECONDS
+
+sanitize() {
+	# strip characters that are awkward in filenames
+	print -r -- "${1//[\/:*?\"<>|]/_}"
+}
+
+# Single-pass split with the segment muxer: ffmpeg reads the file once,
+# sequentially, and writes every chapter as it goes. This avoids the
+# per-chapter re-seek cost that makes N separate `-ss`/`-i` invocations slow
+# on m4b files that aren't "faststart" (moov atom at the end of the file).
+tmp_pattern="$outdir/tmp_%03d.m4a"
+
+if (( n > 1 )); then
+	# segment_times wants the split points, i.e. all starts except the first (0)
+	times_csv="${(j:,:)starts[2,n]}"
+	segment_args=(-f segment -segment_times "$times_csv")
+else
+	segment_args=(-f segment)
+fi
+
+ffmpeg -nostdin -y -i "$file" -map 0:a -c copy -reset_timestamps 1 \
+	"${segment_args[@]}" "$tmp_pattern" >"$logfile" 2>&1 &
 pid=$!
 
-start=$SECONDS
-
 while kill -0 $pid 2>/dev/null; do
-	count=$(find "$outdir" -type f -iname "*.mp3" 2>/dev/null | wc -l)
-	progressbar $count $total $((SECONDS - start))
+	count=$(find "$outdir" -maxdepth 1 -type f -iname "tmp_*.m4a" 2>/dev/null | wc -l)
+	progressbar $count $total $((SECONDS - start_time))
 	sleep 0.5
 done
-
 wait $pid
 rc=$?
-
-count=$(find "$outdir" -type f -iname "*.mp3" 2>/dev/null | wc -l)
-progressbar $count $total $((SECONDS - start))
+count=$(find "$outdir" -maxdepth 1 -type f -iname "tmp_*.m4a" 2>/dev/null | wc -l)
+progressbar $count $total $((SECONDS - start_time))
 echo
 
 if [[ $rc -ne 0 ]]; then
-	echo "m4b-tool failed, log:" >&2
-	cat "$logfile"
+	echo "ffmpeg failed, log:" >&2
+	cat "$logfile" >&2
 	exit "$rc"
 fi
+
+# rename tmp_000.m4a, tmp_001.m4a, ... to "NNN - Title.m4a"
+for ((i=1; i<=n; i++)); do
+	idx=$(printf "%03d" $((i - 1)))
+	src="$outdir/tmp_${idx}.m4a"
+	if [[ ! -f "$src" ]]; then
+		print -u2 -- "split-m4b: warning: expected segment $src not found"
+		continue
+	fi
+	safe_title=$(sanitize "${titles[i]}")
+	dst=$(printf "%s/%03d - %s.m4a" "$outdir" "$i" "$safe_title")
+	mv -- "$src" "$dst"
+done
