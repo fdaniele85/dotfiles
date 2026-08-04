@@ -4,10 +4,10 @@ usage() {
 	cat <<'EOF'
 Usage: tag-books [-r|--rename] [-d|--date DATE] DIRECTORY...
 
-Tag MP3 audiobook files using metadata inferred from each directory name.
+Tag MP3 or M4A audiobook files using metadata inferred from each directory name.
 
 Options:
-  -r, --rename     Rename MP3 files before tagging.
+  -r, --rename     Rename audio files before tagging.
   -d, --date DATE  Base date passed to GNU date. Default: today.
   -h, --help       Show this help.
 
@@ -69,16 +69,27 @@ for dir in "${dirs[@]}"; do
 		(
 			cd "$dir" || exit 1
 
+			typeset -a mp3_files m4a_files audio_files
 			mp3_files=( *.mp3(N) )
-			if (( ${#mp3_files} == 0 )); then
-				print -u2 -- "tag-books: no mp3 files found in $dir"
+			m4a_files=( *.m4a(N) )
+			if (( ${#mp3_files} > 0 && ${#m4a_files} > 0 )); then
+				print -u2 -- "tag-books: mixed MP3 and M4A files are not supported in $dir"
+				exit 65
+			elif (( ${#mp3_files} > 0 )); then
+				format=mp3
+				audio_files=( "${mp3_files[@]}" )
+			elif (( ${#m4a_files} > 0 )); then
+				format=m4a
+				audio_files=( "${m4a_files[@]}" )
+			else
+				print -u2 -- "tag-books: no MP3 or M4A files found in $dir"
 				exit 0
 			fi
 
 			echo "$title"
 			i=1
 			if [[ "$rename_files" == true ]]; then
-				quanti=${#mp3_files}
+				quanti=${#audio_files}
 				digits=1
 				if ((quanti > 9)); then
 					digits=2
@@ -89,24 +100,50 @@ for dir in "${dirs[@]}"; do
 				if ((quanti > 999)); then
 					digits=4
 				fi
-				for f in "${mp3_files[@]}"; do
-					name=$(printf "%s %0${digits}d.mp3" "$title" "$i")
+				for f in "${audio_files[@]}"; do
+					name=$(printf "%s %0${digits}d.%s" "$title" "$i" "$format")
 					((i++))
 					mv "$f" "$name"
 				done
-				mp3_files=( *.mp3(N) )
+				audio_files=( *.$format(N) )
 			fi
 
-			tutti=${#mp3_files}
+			tutti=${#audio_files}
 			i=0
-			for file in "${mp3_files[@]}"; do
+			for file in "${audio_files[@]}"; do
 				data=$(date "+%Y:%m:%d" -d "$base_date+${i}days")
 				((i++))
-				mid3v2 -T "$i/$tutti" -t "${file:r}" -y "$data" "$file"
+				if [[ "$format" == mp3 ]]; then
+					mid3v2 -T "$i/$tutti" -t "${file:r}" -y "$data" "$file"
+				else
+					tmp_file="${file:r}.__tag_books_$$.m4a"
+					if [[ -e "cover.jpg" ]]; then
+						ffmpeg -i "$file" -i "cover.jpg" -map 0:a:0 -map 1:v:0 \
+							-map_metadata 0 -c copy -disposition:v:0 attached_pic \
+							-metadata track="$i/$tutti" -metadata title="${file:r}" \
+							-metadata date="$data" -metadata artist="$author" \
+							-metadata album_artist="$author" -metadata album="$title" \
+							-movflags +faststart "$tmp_file" -y -loglevel error
+					else
+						ffmpeg -i "$file" -map 0 -map_metadata 0 -c copy \
+							-metadata track="$i/$tutti" -metadata title="${file:r}" \
+							-metadata date="$data" -metadata artist="$author" \
+							-metadata album_artist="$author" -metadata album="$title" \
+							-movflags +faststart "$tmp_file" -y -loglevel error
+					fi
+					if (( $? != 0 )); then
+						rm -f -- "$tmp_file"
+						print -u2 -- "tag-books: could not tag $file"
+						exit 1
+					fi
+					mv -- "$tmp_file" "$file"
+				fi
 			done
-			eyeD3 -a "$author" -b "$author" -A "$title" "${mp3_files[@]}"
-			if [[ -e "cover.jpg" ]]; then
-				eyeD3 --add-image="cover.jpg":FRONT_COVER "${mp3_files[@]}"
+			if [[ "$format" == mp3 ]]; then
+				eyeD3 -a "$author" -b "$author" -A "$title" "${audio_files[@]}"
+				if [[ -e "cover.jpg" ]]; then
+					eyeD3 --add-image="cover.jpg":FRONT_COVER "${audio_files[@]}"
+				fi
 			fi
 		)
 	else

@@ -1,6 +1,6 @@
 .TH TAG-BOOKS 1 "Luglio 2026" "tag-books 1.0" "Comandi Utente"
 .SH NOME
-tag-books \- applica tag ID3 a directory di audiolibri MP3
+tag-books \- applica tag a directory di audiolibri MP3 o M4A
 .SH SINTASSI
 .B tag-books
 [\fB\-r\fR|\fB\-\-rename\fR]
@@ -12,8 +12,10 @@ tag-books \- applica tag ID3 a directory di audiolibri MP3
 [\fB\-h\fR|\fB\-\-help\fR]
 .SH DESCRIZIONE
 .B tag-books
-applica tag ID3 ai file
+applica tag ai file
 .B .mp3
+o
+.B .m4a
 contenuti nelle directory indicate.
 .PP
 Autore e titolo vengono dedotti dal nome della directory. Sono supportati nomi
@@ -30,14 +32,18 @@ Per ogni MP3 lo script imposta numero traccia, titolo e anno/data con
 .BR mid3v2 (1).
 Poi imposta artista, album artist e album con
 .BR eyeD3 (1).
+Per gli M4A tutti i metadati vengono impostati tramite
+.BR ffmpeg (1).
 Se nella directory esiste
 .BR cover.jpg ,
 lo aggiunge come copertina frontale.
+.PP
+Una directory non puo contenere contemporaneamente file MP3 e M4A.
 .SH OPZIONI
 .TP
 .BR \-r ", " \-\-rename
-Rinomina gli MP3 prima del tagging usando il titolo della directory e un numero
-progressivo.
+Rinomina i file audio prima del tagging usando il titolo della directory, un
+numero progressivo e l'estensione originale.
 .TP
 .BR \-d ", " \-\-date " " \fIDATE\fR
 Data base passata a
@@ -53,6 +59,8 @@ Mostra l'aiuto.
 .I DIRECTORY
 Directory contenente file
 .B .mp3
+oppure
+.B .m4a
 da taggare.
 .SH ESEMPI
 Taggare una directory:
@@ -85,10 +93,14 @@ Operazione completata.
 .TP
 .B 64
 Uso non valido, opzione sconosciuta o argomento mancante.
+.TP
+.B 65
+La directory contiene contemporaneamente file MP3 e M4A.
 .SH DIPENDENZE
 .BR zsh (1),
 .BR mid3v2 (1),
 .BR eyeD3 (1),
+.BR ffmpeg (1),
 .BR date (1),
 .BR sed (1)
 .SH AUTORE

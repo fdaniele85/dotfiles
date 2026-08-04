@@ -6,12 +6,12 @@ usage() {
   cat <<'EOF'
 Usage: merge-mp3 [OPTIONS] INPUT_DIR MAX_MINUTES
 
-Merge MP3 files from INPUT_DIR into larger MP3 files, each capped at
+Merge MP3 or M4A files from INPUT_DIR into larger files of the same format, capped at
 approximately MAX_MINUTES minutes.
 
 Options:
   --output-prefix PREFIX  Output filename prefix. Default: title from INPUT_DIR.
-  --start-date DATE       Initial date for ID3 year/date tags. Default: today.
+  --start-date DATE       Initial date for audio date tags. Default: today.
   --dry-run               Show planned operations without writing output files.
   -h, --help              Show this help.
 
@@ -138,29 +138,54 @@ cd "$INPUT_DIR"
 
 MAX_MS=$((MAX_MINUTES * 60 * 1000))
 
-typeset -a MP3_FILES
+typeset -a MP3_FILES M4A_FILES AUDIO_FILES
 MP3_FILES=( *.mp3(N) )
-MP3_FILES=(${(on)MP3_FILES})
+M4A_FILES=( *.m4a(N) )
+MP3_FILES=( ${MP3_FILES:#__silence_2s.mp3} )
+MP3_FILES=( ${MP3_FILES:#__merged_output.mp3} )
+M4A_FILES=( ${M4A_FILES:#__silence_2s.m4a} )
+M4A_FILES=( ${M4A_FILES:#__merged_output.m4a} )
 
-if (( ${#MP3_FILES} == 0 )); then
-  print -u2 -- "merge-mp3: no MP3 files found in: $INPUT_DIR"
+if (( ${#MP3_FILES} > 0 && ${#M4A_FILES} > 0 )); then
+  print -u2 -- "merge-mp3: mixed MP3 and M4A files are not supported in: $INPUT_DIR"
+  exit 65
+elif (( ${#MP3_FILES} > 0 )); then
+  FORMAT=mp3
+  AUDIO_FILES=( "${MP3_FILES[@]}" )
+elif (( ${#M4A_FILES} > 0 )); then
+  FORMAT=m4a
+  AUDIO_FILES=( "${M4A_FILES[@]}" )
+else
+  print -u2 -- "merge-mp3: no MP3 or M4A files found in: $INPUT_DIR"
   exit 66
 fi
+AUDIO_FILES=(${(on)AUDIO_FILES})
 
-SILENCE_FILE="__silence_2s.mp3"
-if [[ "$DRY_RUN" == false ]]; then
-  ffmpeg -f lavfi -i anullsrc=r=44100:cl=stereo -t 2 -q:a 9 \
-    -acodec libmp3lame "$SILENCE_FILE" -y -loglevel quiet
-fi
+SILENCE_FILE="__silence_2s.$FORMAT"
 TMP_FILES_TO_DELETE+=("$SILENCE_FILE")
+if [[ "$DRY_RUN" == false ]]; then
+  if [[ "$FORMAT" == mp3 ]]; then
+    ffmpeg -f lavfi -i anullsrc=r=44100:cl=stereo -t 2 -q:a 9 \
+      -acodec libmp3lame "$SILENCE_FILE" -y -loglevel quiet
+  else
+    SAMPLE_RATE="$(ffprobe -v error -select_streams a:0 \
+      -show_entries stream=sample_rate -of default=nw=1:nk=1 "$AUDIO_FILES[1]")"
+    CHANNEL_LAYOUT="$(ffprobe -v error -select_streams a:0 \
+      -show_entries stream=channel_layout -of default=nw=1:nk=1 "$AUDIO_FILES[1]")"
+    [[ -n "$SAMPLE_RATE" ]] || die "could not determine M4A sample rate"
+    [[ -n "$CHANNEL_LAYOUT" ]] || die "could not determine M4A channel layout"
+    ffmpeg -f lavfi -i "anullsrc=r=${SAMPLE_RATE}:cl=${CHANNEL_LAYOUT}" -t 2 \
+      -c:a aac -b:a 64k "$SILENCE_FILE" -y -loglevel quiet
+  fi
+fi
 
 INDEX=1
 TMP_LIST="__concat_list.txt"
-TMP_MERGE="__merged_output.mp3"
+TMP_MERGE="__merged_output.$FORMAT"
 CURRENT_DATE="$START_DATE"
 
-: > "$TMP_LIST"
 TMP_FILES_TO_DELETE+=("$TMP_LIST" "$TMP_MERGE")
+: > "$TMP_LIST"
 
 CURRENT_DURATION=0
 
@@ -169,9 +194,29 @@ tag_output() {
   local index="$2"
   local date="$3"
 
-  mid3v2 -a "$ARTIST" -A "$TITLE" -t "$outfile" -T "$index" -y "$date" "$outfile"
-  if [[ -f "$COVER" ]]; then
-    eyeD3 --add-image "$COVER":FRONT_COVER "$outfile" > /dev/null
+  if [[ "$FORMAT" == mp3 ]]; then
+    mid3v2 -a "$ARTIST" -A "$TITLE" -t "$outfile" -T "$index" -y "$date" "$outfile"
+    if [[ -f "$COVER" ]]; then
+      eyeD3 --add-image "$COVER":FRONT_COVER "$outfile" > /dev/null
+    fi
+  else
+    local tagged_file="${outfile:r}.__tagging_$$.m4a"
+    TMP_FILES_TO_DELETE+=("$tagged_file")
+    if [[ -f "$COVER" ]]; then
+      ffmpeg -i "$outfile" -i "$COVER" -map 0:a:0 -map 1:v:0 \
+        -map_metadata 0 -c copy -disposition:v:0 attached_pic \
+        -metadata artist="$ARTIST" -metadata album_artist="$ARTIST" \
+        -metadata album="$TITLE" -metadata title="$outfile" \
+        -metadata track="$index" -metadata date="$date" \
+        -movflags +faststart "$tagged_file" -y -loglevel error
+    else
+      ffmpeg -i "$outfile" -map 0 -map_metadata 0 -c copy \
+        -metadata artist="$ARTIST" -metadata album_artist="$ARTIST" \
+        -metadata album="$TITLE" -metadata title="$outfile" \
+        -metadata track="$index" -metadata date="$date" \
+        -movflags +faststart "$tagged_file" -y -loglevel error
+    fi
+    mv -- "$tagged_file" "$outfile"
   fi
 
   return 0
@@ -185,12 +230,13 @@ advance_output_state() {
 }
 
 export_current_batch() {
-  local outfile="${OUTPUT_PREFIX}_$(printf "%02d" "$INDEX").mp3"
+  local outfile="${OUTPUT_PREFIX}_$(printf "%02d" "$INDEX").$FORMAT"
   local duration_ms="$1"
   local duration_min=$(((duration_ms + 500) / 1000 / 60))
 
   if [[ "$DRY_RUN" == false ]]; then
-    ffmpeg -f concat -safe 0 -i "$TMP_LIST" -c copy "$TMP_MERGE" -loglevel quiet
+    ffmpeg -f concat -safe 0 -i "$TMP_LIST" -map 0:a:0 -c:a copy -vn \
+      "$TMP_MERGE" -y -loglevel error
     mv "$TMP_MERGE" "$outfile"
     tag_output "$outfile" "$INDEX" "$CURRENT_DATE"
   fi
@@ -203,7 +249,7 @@ export_current_batch() {
 export_single_file() {
   local input_file="$1"
   local duration_ms="$2"
-  local outfile="${OUTPUT_PREFIX}_$(printf "%02d" "$INDEX").mp3"
+  local outfile="${OUTPUT_PREFIX}_$(printf "%02d" "$INDEX").$FORMAT"
   local duration_min=$(((duration_ms + 500) / 1000 / 60))
 
   if [[ "$DRY_RUN" == false ]]; then
@@ -217,11 +263,11 @@ export_single_file() {
   INDEX=$((INDEX + 1))
 }
 
-TOTAL_FILES=${#MP3_FILES[@]}
+TOTAL_FILES=${#AUDIO_FILES[@]}
 i=1
-print -n "\nReading MP3 files...\n"
+print -n "\nReading ${FORMAT:u} files...\n"
 
-for f in "${MP3_FILES[@]}"; do
+for f in "${AUDIO_FILES[@]}"; do
   DUR_MS=$(ffprobe -v error -show_entries format=duration \
     -of default=noprint_wrappers=1:nokey=1 "$f" |
     awk '{printf("%d", $1 * 1000)}')
@@ -262,11 +308,11 @@ fi
 
 if [[ "$DRY_RUN" == false ]]; then
   mkdir -p originali_backup
-  for f in "${MP3_FILES[@]}"; do
+  for f in "${AUDIO_FILES[@]}"; do
     mv "$f" "originali_backup/$f.bak"
   done
 else
-  for f in "${MP3_FILES[@]}"; do
+  for f in "${AUDIO_FILES[@]}"; do
     print -- "[DRY-RUN] $f -> originali_backup/$f.bak"
   done
 fi

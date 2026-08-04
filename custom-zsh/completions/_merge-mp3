@@ -4,9 +4,9 @@ _merge_mp3() {
     _arguments -s -S \
         '(-h --help)'{-h,--help}'[mostra aiuto]' \
         '--output-prefix[prefisso per i file generati]:prefisso:' \
-        '--start-date[data iniziale per i tag ID3]:data:' \
+        '--start-date[data iniziale per i tag audio]:data:' \
         '--dry-run[mostra operazioni senza scrivere file]' \
-        '1:directory mp3:_files -/' \
+        '1:directory mp3 o m4a:_files -/' \
         '2:durata massima in minuti:'
 }
 
