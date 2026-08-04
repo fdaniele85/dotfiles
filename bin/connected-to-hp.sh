@@ -12,7 +12,11 @@
 
 # exit 1
 
-host="192.168.1.13"
+if [[ $1 == "--internal" ]]; then
+  host="192.168.1.13"
+else
+  host="100.64.0.3"
+fi
 port=22
 
 # deve esistere known_hosts con almeno una chiave
