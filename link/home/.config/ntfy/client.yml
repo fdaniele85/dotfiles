@@ -15,3 +15,5 @@ subscribe:
   command: /home/daniele/.dotfiles/bin/notify.sh "$t" "$m"
 - topic: on-this-day-db1fcd79b057
   command: /home/daniele/.dotfiles/bin/notify.sh "$t" "$m"
+- topic: podcast_31d6cfe0d16ae931b73c59d7e0c089c0
+  command: /home/daniele/.dotfiles/bin/notify.sh "$t" "$m"

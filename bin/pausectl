@@ -87,7 +87,7 @@ case "$cmd" in
       if (( ${#files[@]} )); then
         echo "Active pause files:"
         # elenco con timestamp mtime
-        /bin/ls -l --time-style='+%F %T' "${BASE_DIR}"/* | awk '{print $6" "$7" "$9}'
+        /bin/ls -l --time-style='+%F %T' "${BASE_DIR}"/* | awk '{print $6" "$7" "$8}'
       else
         echo "(no active pauses)"
       fi
