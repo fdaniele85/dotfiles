@@ -4,14 +4,20 @@ import argparse
 import datetime
 import json
 import os
+from pathlib import Path
 import sys
 import urllib.error
 import urllib.parse
 import urllib.request
 
+from dotenv import load_dotenv
+
+
+load_dotenv(Path(__file__).resolve().parent / ".env")
+
 
 def endpoint_from_environment():
-    endpoint = os.getenv("SWRR_API_URL", "http://localhost:3000").strip().rstrip("/")
+    endpoint = os.getenv("SWRR_API_URL", "https://swr.fdaniele.net/").strip().rstrip("/")
     if not endpoint.startswith(("http://", "https://")):
         endpoint = f"http://{endpoint}"
     return endpoint
@@ -55,6 +61,7 @@ def flatten_tables(tables):
             "key": table["key"],
             "label": label,
             "section": table["section"],
+            "items": table.get("items", []),
         })
         for item in table.get("items", []):
             child = item.get("childTable")
@@ -145,6 +152,7 @@ def parse_arguments():
         help="Chiave o nome della tabella (--database è mantenuto per compatibilità)",
     )
     parser.add_argument("--target", type=int, help="Ferma quando un elemento raggiunge N consumi")
+    parser.add_argument("--target-item", help="Nome o ID dell'elemento che deve raggiungere --target")
     parser.add_argument("--all", type=int, help="Ferma quando tutti gli elementi raggiungono almeno N consumi")
     parser.add_argument("--days", type=int, help="Numero di sessioni da simulare")
     parser.add_argument(
@@ -159,6 +167,9 @@ def parse_arguments():
 
 def main():
     args = parse_arguments()
+    if args.target_item is not None and args.target is None:
+        print("Errore: --target-item richiede --target", file=sys.stderr)
+        return 2
     criteria = {
         key: value
         for key, value in (("days", args.days), ("target", args.target), ("all", args.all))
@@ -182,6 +193,17 @@ def main():
             return 2
 
         table = resolve_table(args.table, tables)
+        if args.target_item is not None:
+            matches = [item for item in table["items"] if str(item["id"]) == args.target_item]
+            if not matches:
+                matches = [item for item in table["items"]
+                           if item["name"].casefold() == args.target_item.casefold()]
+            if not matches:
+                raise RuntimeError(f"Elemento '{args.target_item}' non trovato nella tabella selezionata")
+            if len(matches) > 1:
+                ids = ", ".join(str(item["id"]) for item in matches)
+                raise RuntimeError(f"Nome elemento ambiguo; usa uno di questi ID: {ids}")
+            criteria["targetItemId"] = matches[0]["id"]
         table_key = urllib.parse.quote(table["key"], safe="")
         if args.start:
             criteria["startedAt"] = args.start

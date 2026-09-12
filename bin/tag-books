@@ -86,7 +86,11 @@ for dir in "${dirs[@]}"; do
 				exit 0
 			fi
 
-			echo "$title"
+			if [[ -e "cover.jpg" ]]; then
+				print -r -- "$title (cover presente)"
+			else
+				print -r -- "$title"
+			fi
 			i=1
 			if [[ "$rename_files" == true ]]; then
 				quanti=${#audio_files}
@@ -113,6 +117,7 @@ for dir in "${dirs[@]}"; do
 			for file in "${audio_files[@]}"; do
 				data=$(date "+%Y:%m:%d" -d "$base_date+${i}days")
 				((i++))
+				print -r -- "[$i/$tutti] Tagging: ${file:r}"
 				if [[ "$format" == mp3 ]]; then
 					mid3v2 -T "$i/$tutti" -t "${file:r}" -y "$data" "$file"
 				else
