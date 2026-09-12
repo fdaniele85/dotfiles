@@ -97,3 +97,11 @@ fi
 zle -N _sgpt_zsh
 bindkey ^l _sgpt_zsh
 # Shell-GPT integration ZSH v0.2
+
+
+# Carica il modulo per la ricerca con pattern
+autoload -Uz history-incremental-pattern-search-backward history-incremental-pattern-search-forward
+
+# Associa Ctrl+R alla ricerca con pattern
+bindkey '^R' history-incremental-pattern-search-backward
+bindkey '^S' history-incremental-pattern-search-forward
