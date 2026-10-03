@@ -22,6 +22,7 @@ Script che estrae valori da JSON (objectpath), aggrega con pandas e scrive una t
 
 Uso essenziale:
   script.py --arguments 'field' --mean --median --std <dirs...>
+  script.py --arguments 'field' --mean --time-limit 60 --incumbent-time time <dirs...>
   script.py --onlyOne <dirs...>
 
 Nota: lo script richiede pandas.
@@ -81,6 +82,20 @@ def parse_args():
     group.add_argument("--empty", help="Print rows with empty values", action="store_true")
     group.add_argument("--complete", help="Print only rows with values for all algorithms", action="store_true")
     p.add_argument("--arguments", nargs='+', help="Arguments")
+    p.add_argument(
+        "--time-limit",
+        type=float,
+        help="Extract --arguments from the last incumbent whose time is not greater than this value.",
+    )
+    p.add_argument(
+        "--incumbent-time",
+        help="Objectpath expression, relative to an incumbent, containing its time.",
+    )
+    p.add_argument(
+        "--incumbents-path",
+        default="incumbents",
+        help="Objectpath expression containing the incumbent array (default: incumbents).",
+    )
     p.add_argument(
         "--best-by",
         help="Select the best run for each instance using this objectpath expression. "
@@ -179,6 +194,28 @@ def collect_ris_entries(input_path, type_regex, replace, grep, grep_invert):
     return entries
 
 
+def select_incumbent_at_time(tree, incumbents_expr, time_expr, time_limit):
+    incumbents = execute_preserve_shape(tree, '$.' + incumbents_expr)
+    if not isinstance(incumbents, (list, tuple)):
+        incumbents = list(incumbents)
+
+    selected = None
+    for incumbent in incumbents:
+        if not isinstance(incumbent, dict):
+            continue
+        try:
+            incumbent_tree = objectpath.Tree(incumbent)
+            incumbent_time = safe_execute(incumbent_tree, '$.' + time_expr)
+            if not isinstance(incumbent_time, (int, float, np.number)):
+                continue
+            if float(incumbent_time) <= time_limit:
+                selected = incumbent
+        except Exception:
+            continue
+
+    return selected
+
+
 def open_ris_entry(entry):
     return open(entry["path"], "r", encoding="utf-8")
 
@@ -214,6 +251,16 @@ def main():
     silent = args.silent
     best_by = args.best_by
     solution_expr = args.solution
+    time_limit = args.time_limit
+    incumbent_time = args.incumbent_time
+    incumbents_path = args.incumbents_path
+
+    if (time_limit is None) != (incumbent_time is None):
+        sys.exit("--time-limit and --incumbent-time must be used together.")
+    if time_limit is not None and not richiesti:
+        sys.exit("--time-limit requires --arguments.")
+    if time_limit is not None and best_by:
+        sys.exit("--time-limit cannot be used with --best-by.")
 
     if not onlyOne and best_by and not solution_expr:
         sys.exit("--solution is required with --best-by.")
@@ -400,6 +447,21 @@ def main():
                         continue
                     run_scores.append({'dir': nomi[dr], 'typ': typ, 'run_id': run_id, 'score': score_num})
 
+                argument_tree = tree
+                if time_limit is not None:
+                    try:
+                        selected_incumbent = select_incumbent_at_time(
+                            tree,
+                            incumbents_path,
+                            incumbent_time,
+                            time_limit,
+                        )
+                    except Exception:
+                        continue
+                    if selected_incumbent is None:
+                        continue
+                    argument_tree = objectpath.Tree(selected_incumbent)
+
                 for arg in richiesti:
                     m = re.search(r'^(.*)\s*\|\s*length$', arg)
                     want_length = False
@@ -409,7 +471,7 @@ def main():
                         want_length = True
 
                     try:
-                        val = safe_execute(tree, '$.' + expr)
+                        val = safe_execute(argument_tree, '$.' + expr)
                     except Exception:
                         continue
 
