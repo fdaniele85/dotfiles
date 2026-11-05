@@ -3,3 +3,4 @@ backups/*
 .idea
 __pycache__/
 *.pyc
+/bin/tests/
