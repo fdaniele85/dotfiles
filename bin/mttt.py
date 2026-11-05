@@ -1,4 +1,4 @@
-#! /home/daniele/Dropbox/linux_files/scripts/venv/bin/python3
+#! /home/daniele/.venvs/scripts_1553aca88f67/bin/python3
 
 import os
 import sys
@@ -20,6 +20,22 @@ parser.add_argument("-M", help="Type regex", required=True)
 parser.add_argument("--minmax", help="Type regex", default="max")
 parser.add_argument("-g", "--grep", help="Grep regex")
 parser.add_argument("-n", "--names", nargs='+', help="Algorithms' names")
+parser.add_argument(
+	"--sense",
+	choices=("min", "max"),
+	default="min",
+	help="Optimization sense (default: min)",
+)
+parser.add_argument(
+	"--cost-path",
+	default="solution.cost",
+	help="Dot-separated JSON path of the final solution cost (default: solution.cost)",
+)
+parser.add_argument(
+	"--incumbent-cost-path",
+	default="cost",
+	help="Dot-separated cost path relative to each incumbent (default: cost)",
+)
 
 args = parser.parse_args()
 inputs = args.inputs
@@ -30,6 +46,29 @@ minmax = args.minmax
 grep = args.grep
 ask = args.ask
 names = args.names
+maximize = args.sense == "max"
+costPath = args.cost_path
+incumbentCostPath = args.incumbent_cost_path
+
+
+def json_value(value, path):
+	"""Return the value at a dot-separated path in a JSON object."""
+	for element in path.split('.'):
+		if isinstance(value, list):
+			value = value[int(element)]
+		else:
+			value = value[element]
+	return value
+
+
+def normalized_cost(value, path):
+	"""Map both optimization senses to minimization."""
+	cost = json_value(value, path)
+	return -cost if maximize else cost
+
+
+def displayed_cost(cost):
+	return -cost if maximize else cost
 
 if typeRegex is None:
     typeRegex = "_\\d+\\.ris$"
@@ -103,16 +142,18 @@ for dr in inputs:
 		typ = re.sub(typeRegex, '', fil)
 		a = tutti[dr][fil]
 
-		if (typ not in minimum[dr]) or a['solution']['cost'] < minimum[dr][typ]:
-			minimum[dr][typ] = a['solution']['cost']
+		cost = normalized_cost(a, costPath)
+		if (typ not in minimum[dr]) or cost < minimum[dr][typ]:
+			minimum[dr][typ] = cost
 
 if minmax == 'worst':
 	for dr in inputs:
 		for fil in beccati:
 			typ = re.sub(typeRegex, '', fil)
 			a = tutti[dr][fil]
-			if (typ not in maximum) or maximum[typ] < a['solution']['cost']:
-				maximum[typ] = a['solution']['cost']
+			cost = normalized_cost(a, costPath)
+			if (typ not in maximum) or maximum[typ] < cost:
+				maximum[typ] = cost
 else:
 	for dr in inputs:
 		for typ in minimum[dr].keys():
@@ -120,7 +161,7 @@ else:
 				maximum[typ] = minimum[dr][typ]
 
 for typ in maximum.keys():
-	print(typ, maximum[typ])
+	print(typ, displayed_cost(maximum[typ]))
 
 minimum = {}
 for dr in inputs:
@@ -134,8 +175,9 @@ for dr in inputs:
 			#if (typ not in maximum) or a['Solution']['Cost'] > maximum[typ]:
 			#		maximum[typ] = a['Solution']['Cost']
 
-			if (typ not in minimum) or a['solution']['cost'] < minimum[typ]:
-					minimum[typ] = a['solution']['cost']
+			cost = normalized_cost(a, costPath)
+			if (typ not in minimum) or cost < minimum[typ]:
+					minimum[typ] = cost
 					
 
 			if a['time']['wall'] > maxtime:
@@ -185,12 +227,12 @@ for dr in inputs:
 			if len(a['incumbents']) > 0:
 				for q in a['incumbents']:
 					# sys.stderr.write(dr + ":" + typ + ":"+ str(q['Cost']['Cost']) +":" + str(tofind) + "\n")
-					if q['cost'] <= tofind:
+					if normalized_cost(q, incumbentCostPath) <= tofind:
 						toadd = q['time']
 						found = True
 						break
 			else:
-				if a['solution']['feasible'] and a['solution']['cost'] <= tofind:
+				if a['solution']['feasible'] and normalized_cost(a, costPath) <= tofind:
 					toadd = a['time']['wall']
 					found = True
 
@@ -213,4 +255,4 @@ for dr in inputs:
 fp.close()
 
 print(tmpfilename, out)
-subprocess.call (["/usr/bin/Rscript", "--vanilla", "/home/daniele/Dropbox/linux_files/R/mttt.r", "--infile", tmpfilename, "--out" , out])
+subprocess.call (["/usr/bin/Rscript", "--vanilla", "/home/daniele/mttt.r", "--infile", tmpfilename, "--out" , out])
