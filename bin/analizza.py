@@ -7,6 +7,12 @@ import re
 import json
 import argparse
 import csv
+import importlib
+import math
+import posixpath
+import tempfile
+import zipfile
+import xml.etree.ElementTree as ET
 import objectpath
 import numpy as np
 import random
@@ -220,6 +226,96 @@ def open_ris_entry(entry):
     return open(entry["path"], "r", encoding="utf-8")
 
 
+def read_excel_formula_results(path):
+    """Keep existing formula caches when openpyxl rewrites a workbook."""
+    ns = {'s': 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
+    rel_ns = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
+    results = {}
+    with zipfile.ZipFile(path) as source:
+        workbook = ET.fromstring(source.read('xl/workbook.xml'))
+        relationships = ET.fromstring(source.read('xl/_rels/workbook.xml.rels'))
+        targets = {item.get('Id'): item.get('Target') for item in relationships}
+        for sheet in workbook.findall('s:sheets/s:sheet', ns):
+            target = targets[sheet.get('{' + rel_ns + '}id')]
+            worksheet_path = (target.lstrip('/') if target.startswith('/')
+                              else posixpath.normpath(posixpath.join('xl', target)))
+            # Chartsheets do not contain worksheet cells.
+            worksheet = ET.fromstring(source.read(worksheet_path))
+            cached = {}
+            for cell in worksheet.findall('.//s:c', ns):
+                value = cell.find('s:v', ns)
+                if cell.find('s:f', ns) is None or value is None:
+                    continue
+                cached[cell.get('r')] = (cell.get('t'), value.text)
+            results[sheet.get('name')] = cached
+    return results
+
+
+def cache_excel_formula_results(path, sheet_name, results):
+    """Add formula caches to an XLSX written by openpyxl (which cannot set them)."""
+    if not results:
+        return
+    spreadsheet_ns = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
+    document_rel_ns = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
+    package_rel_ns = 'http://schemas.openxmlformats.org/package/2006/relationships'
+    tag = lambda name: '{' + spreadsheet_ns + '}' + name
+    temporary_path = None
+    try:
+        with zipfile.ZipFile(path) as source:
+            workbook = ET.fromstring(source.read('xl/workbook.xml'))
+            sheet = next(item for item in workbook.find(tag('sheets'))
+                         if item.get('name') == sheet_name)
+            relationship_id = sheet.get('{' + document_rel_ns + '}id')
+            relationships = ET.fromstring(source.read('xl/_rels/workbook.xml.rels'))
+            relationship = next(item for item in relationships.findall('{' + package_rel_ns + '}Relationship')
+                                if item.get('Id') == relationship_id)
+            target = relationship.get('Target')
+            worksheet_path = (target.lstrip('/') if target.startswith('/')
+                              else posixpath.normpath(posixpath.join('xl', target)))
+            worksheet = ET.fromstring(source.read(worksheet_path))
+            pending = dict(results)
+            for cell in worksheet.iter(tag('c')):
+                reference = cell.get('r')
+                if reference not in pending:
+                    continue
+                if cell.find(tag('f')) is None:
+                    raise ValueError(f"Expected a formula in {sheet_name}!{reference}")
+                result = pending.pop(reference)
+                value = cell.find(tag('v'))
+                if value is None:
+                    value = ET.SubElement(cell, tag('v'))
+                if isinstance(result, tuple):
+                    # Preserve the original cached type (including errors/bools).
+                    value_type, value.text = result
+                    if value_type is None:
+                        cell.attrib.pop('t', None)
+                    else:
+                        cell.set('t', value_type)
+                elif result == '':
+                    cell.set('t', 'str')
+                    value.text = None
+                else:
+                    cell.attrib.pop('t', None)
+                    value.text = repr(float(result))
+            if pending:
+                raise ValueError(f"Missing formula cells: {', '.join(pending)}")
+            worksheet_xml = ET.tostring(worksheet, encoding='utf-8', xml_declaration=True)
+            with tempfile.NamedTemporaryFile(
+                    dir=os.path.dirname(os.path.abspath(path)), suffix='.xlsx', delete=False) as temporary:
+                temporary_path = temporary.name
+            with zipfile.ZipFile(temporary_path, 'w') as destination:
+                destination.comment = source.comment
+                for item in source.infolist():
+                    destination.writestr(item, worksheet_xml if item.filename == worksheet_path
+                                         else source.read(item.filename))
+        os.chmod(temporary_path, os.stat(path).st_mode & 0o777)
+        os.replace(temporary_path, path)
+        temporary_path = None
+    finally:
+        if temporary_path is not None:
+            os.unlink(temporary_path)
+
+
 def main():
     args = parse_args()
 
@@ -318,6 +414,98 @@ def main():
     # writer
     out_path = args.out
     writer = None
+
+    if args.digits < 0:
+        sys.exit("--digits must be non-negative.")
+    if time_limit is not None and (not math.isfinite(time_limit) or time_limit < 0):
+        sys.exit("--time-limit must be finite and non-negative.")
+    try:
+        type_pattern = re.compile(typeRegex)
+        # Validate replacement backreferences even when there are no files.
+        type_pattern.sub(replace, '')
+        if grep is not None:
+            re.compile(grep)
+    except (re.error, IndexError) as exc:
+        sys.exit(f"Invalid --type/--replace or --grep: {exc}")
+
+    # Validate command options before listing or loading result files.
+    metrics = []
+    order_metrics = []
+    for enabled, metric in (
+        (args.mean, 'mean'),
+        (args.median, 'median'),
+        (stddev, 'std'),
+        (count_flag, 'count'),
+        (args.min, 'min'),
+        (args.max, 'max'),
+    ):
+        if enabled:
+            metrics.append((metric, metric))
+            order_metrics.append(metric)
+
+    if not onlyOne:
+        if not best_by and not metrics:
+            sys.exit("No aggregation flag requested (e.g. --mean, --median, ...).")
+        if out_path is not None:
+            if best_by:
+                if len(out_path) != 1:
+                    sys.exit("--out with --best-by requires exactly one CSV output path.")
+                if not out_path[0].lower().endswith('.csv'):
+                    sys.exit("--out with --best-by supports only .csv output.")
+            else:
+                if len(out_path) not in (1, 2):
+                    sys.exit("--out requires 1 or 2 arguments: FILE [SHEET]")
+                if not out_path[0].lower().endswith(('.xlsx', '.xls')):
+                    sys.exit("--out supports only .xlsx or .xls output")
+                if (len(out_path) == 2 and os.path.exists(out_path[0])
+                        and out_path[0].lower().endswith('.xls')):
+                    sys.exit("Appending/replacing sheets is not supported for .xls. Use .xlsx instead.")
+
+                sheet_name = out_path[1] if len(out_path) == 2 else None
+                sheet_to_use = sheet_name or "Sheet1"
+                if (len(sheet_to_use) > 31 or re.search(r'[\[\]:*?/\\]', sheet_to_use)
+                        or sheet_to_use.startswith("'") or sheet_to_use.endswith("'")):
+                    sys.exit("Invalid Excel sheet name (maximum 31 characters; no []:*?/\\ or leading/trailing apostrophe).")
+                mode = 'a' if sheet_name and os.path.exists(out_path[0]) else 'w'
+                if_sheet_exists = 'replace' if mode == 'a' else None
+                if mode == 'a':
+                    engine = 'openpyxl'
+                elif out_path[0].lower().endswith('.xls'):
+                    engine = 'xlwt'
+                else:
+                    try:
+                        importlib.import_module('xlsxwriter')
+                        engine = 'xlsxwriter'
+                    except ImportError:
+                        engine = 'openpyxl'
+                try:
+                    importlib.import_module(engine)
+                    pd.io.excel._util.get_writer(engine)
+                except (ImportError, ValueError) as exc:
+                    sys.exit(f"Excel engine {engine} is unavailable: {exc}")
+                if mode == 'a':
+                    try:
+                        workbook = importlib.import_module('openpyxl').load_workbook(
+                            out_path[0], read_only=True,
+                        )
+                        workbook.close()
+                    except Exception as exc:
+                        sys.exit(f"Cannot read existing Excel file {out_path[0]}: {exc}")
+
+        output_targets = ([out_path[0]] if out_path else [])
+        if args.to_parquet and not best_by:
+            output_targets.append(args.to_parquet)
+            try:
+                from pandas.io.parquet import get_engine
+                get_engine('auto')
+            except ImportError as exc:
+                sys.exit(f"Parquet engine is unavailable: {exc}")
+        for target in output_targets:
+            parent = os.path.dirname(os.path.abspath(target))
+            if not os.path.isdir(parent) or not os.access(parent, os.W_OK):
+                sys.exit(f"Output directory does not exist or is not writable: {parent}")
+            if os.path.exists(target) and (not os.path.isfile(target) or not os.access(target, os.W_OK)):
+                sys.exit(f"Output path is not a writable file: {target}")
 
     # prepare display names
     nomi = {}
@@ -523,11 +711,7 @@ def main():
             out_writer = csv.writer(sys.stdout, delimiter=',')
         else:
             out_args = args.out
-            if len(out_args) != 1:
-                sys.exit("--out with --best-by requires exactly one CSV output path.")
             out_path_single = out_args[0]
-            if not out_path_single.lower().endswith(".csv"):
-                sys.exit("--out with --best-by supports only .csv output.")
             csvfile = open(out_path_single, 'w', newline='', encoding='utf-8')
             out_writer = csv.writer(csvfile, delimiter=',')
 
@@ -567,31 +751,6 @@ def main():
             # sys.stderr.write(f"Saved parquet to {args.to_parquet}\n")
         except Exception as e:
             sys.stderr.write(f"Failed to save parquet: {e}\n")
-
-    # quali metriche calcolare
-    metrics = []
-    order_metrics = []
-    if args.mean:
-        metrics.append(('mean', 'mean'))
-        order_metrics.append('mean')
-    if args.median:
-        metrics.append(('median', 'median'))
-        order_metrics.append('median')
-    if stddev:
-        metrics.append(('std', 'std'))
-        order_metrics.append('std')
-    if count_flag:
-        metrics.append(('count', 'count'))
-        order_metrics.append('count')
-    if args.min:
-        metrics.append(('min', 'min'))
-        order_metrics.append('min')
-    if args.max:
-        metrics.append(('max', 'max'))
-        order_metrics.append('max')
-
-    if not metrics:
-        sys.exit("No aggregation flag requested (e.g. --mean, --median, ...).")
 
     # groupby + agg -> DataFrame with MultiIndex (typ, dir, arg)
     agg_map = { 'value': [m[0] for m in metrics] }
@@ -720,6 +879,7 @@ def main():
         for row in righe:
             out_lines.append(','.join(map(str, round_floats(row, args.digits))))
 
+    formula_results = {}
     # optionally compute column means and append as last CSV row
     if args.columnMean and len(out_lines) > 0:
         # determine number of header rows at start of righe
@@ -781,32 +941,36 @@ def main():
                 if gap_vals is not None:
                     righe.append(gap_vals)
             else:
-                # Excel: write formulas so values stay numeric and auto-update
-                data_start_row = header_count + 1  # 1-based in Excel
-                data_end_row = len(righe)  # last data row (before mean row)
-                means_excel = ["MEAN"]
-                for c in range(2, num_cols + 1):
-                    if data_end_row < data_start_row:
-                        means_excel.append("")
-                    else:
-                        col_letter = excel_col_letter(c)
-                        means_excel.append(f"=AVERAGE({col_letter}{data_start_row}:{col_letter}{data_end_row})")
+                data_start_row = header_count + 1
+                data_end_row = len(righe)
                 righe.append([""] * num_cols)
-                mean_row_idx = len(righe) + 1  # 1-based row index in Excel after append
+                mean_row_idx = len(righe) + 1
+                means_excel = ['MEAN']
+                for c in range(1, num_cols):
+                    col_letter = excel_col_letter(c + 1)
+                    # IFERROR keeps columns with no numeric data blank.
+                    means_excel.append(
+                        f'=IFERROR(AVERAGE({col_letter}{data_start_row}:{col_letter}{data_end_row}),"")'
+                    )
+                    formula_results[f'{col_letter}{mean_row_idx}'] = means[c]
                 righe.append(means_excel)
-
-                if args.gap:
-                    gap_excel = ["GAP"]
-                    block_size = len(richiesti) * len(order_metrics)
-                    for c in range(2, num_cols + 1):
-                        if (c - 1) <= block_size:
-                            gap_excel.append("")
+                if gap_vals is not None:
+                    gap_row_idx = len(righe) + 1
+                    gap_excel = ['GAP']
+                    for c in range(1, num_cols):
+                        if c <= block_size:
+                            gap_excel.append('')
                             continue
-                        base_col_idx = 1 + ((c - 2) % block_size)
-                        base_col_letter = excel_col_letter(base_col_idx + 1)
-                        cur_col_letter = excel_col_letter(c)
+                        base_idx = 1 + ((c - 1) % block_size)
+                        base_cell = f'{excel_col_letter(base_idx + 1)}{mean_row_idx}'
+                        current_cell = f'{excel_col_letter(c + 1)}{mean_row_idx}'
                         gap_excel.append(
-                            f"=IF({base_col_letter}{mean_row_idx}=0,\"\",({cur_col_letter}{mean_row_idx}-{base_col_letter}{mean_row_idx})/{base_col_letter}{mean_row_idx})"
+                            f'=IFERROR(IF(OR({base_cell}=0,{base_cell}="",{current_cell}=""),"",'
+                            f'({current_cell}-{base_cell})/{base_cell}),"")'
+                        )
+                        result = gap_vals[c]
+                        formula_results[f'{excel_col_letter(c + 1)}{gap_row_idx}'] = (
+                            result / 100.0 if result != '' else ''
                         )
                     righe.append(gap_excel)
     if out_path is None:
@@ -814,45 +978,15 @@ def main():
             print(ln)
     else:
         out_args = args.out
-        if len(out_args) < 1 or len(out_args) > 2:
-            sys.exit("--out requires 1 or 2 arguments: FILE [SHEET]")
         out_path = out_args[0]
-        sheet_name = out_args[1] if len(out_args) == 2 else None
-
-        out_lower = out_path.lower()
-        if not (out_lower.endswith(".xlsx") or out_lower.endswith(".xls")):
-            sys.exit("--out supports only .xlsx or .xls output")
-
         df_out = pd.DataFrame(righe)
-        file_exists = os.path.exists(out_path)
-
-        if sheet_name and file_exists:
-            if out_lower.endswith(".xls"):
-                sys.exit("Appending/replacing sheets is not supported for .xls. Use .xlsx instead.")
-            engine = "openpyxl"
-            mode = "a"
-            if_sheet_exists = "replace"
-        else:
-            mode = "w"
-            if_sheet_exists = None
-            if out_lower.endswith(".xlsx"):
-                try:
-                    import xlsxwriter  # noqa: F401
-                    engine = "xlsxwriter"
-                except Exception:
-                    engine = "openpyxl"
-            else:
-                try:
-                    import xlwt  # noqa: F401
-                    engine = "xlwt"
-                except Exception:
-                    sys.exit("Missing xlwt for .xls output. Install xlwt or use .xlsx.")
-
-        sheet_to_use = sheet_name or "Sheet1"
         num_fmt = "0" if args.digits <= 0 else "0." + ("0" * args.digits)
         pct_fmt = "0" if args.digits <= 0 else "0." + ("0" * args.digits) + "%"
 
         try:
+            previous_formula_results = (
+                read_excel_formula_results(out_path) if engine == 'openpyxl' and mode == 'a' else {}
+            )
             with pd.ExcelWriter(out_path, engine=engine, mode=mode, if_sheet_exists=if_sheet_exists) as writer:
                 df_out.to_excel(writer, index=False, header=False, sheet_name=sheet_to_use)
                 if engine == "xlsxwriter":
@@ -868,9 +1002,18 @@ def main():
                         gap_row_idx = df_out.shape[0]  # 1-based row index in Excel
                         gap_fmt = workbook.add_format({"num_format": pct_fmt})
                         worksheet.set_row(gap_row_idx - 1, None, gap_fmt)
-                    # Force full recalculation on load (LibreOffice/Excel)
+                    for reference, result in formula_results.items():
+                        match = re.fullmatch(r'([A-Z]+)(\d+)', reference)
+                        row_idx = int(match.group(2)) - 1
+                        col_idx = 0
+                        for letter in match.group(1):
+                            col_idx = col_idx * 26 + ord(letter) - ord('A') + 1
+                        worksheet.write_formula(
+                            reference, righe[row_idx][col_idx - 1],
+                            gap_fmt if args.gap and row_idx == gap_row_idx - 1 else fmt,
+                            result,
+                        )
                     workbook.set_calc_mode('auto')
-                    workbook.set_calc_on_load()
                 elif engine == "openpyxl":
                     ws = writer.sheets.get(sheet_to_use) or writer.book[sheet_to_use]
                     for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=2, max_col=ws.max_column):
@@ -887,12 +1030,15 @@ def main():
                         for cell in ws[gap_row_idx][1:]:
                             if cell.value is not None:
                                 cell.number_format = pct_fmt
-                    # Force full recalculation on load (LibreOffice/Excel)
-                    try:
-                        writer.book.calc_properties.calcMode = "auto"
-                        writer.book.calc_properties.fullCalcOnLoad = True
-                    except Exception:
-                        pass
+                    from openpyxl.workbook.properties import CalcProperties
+                    writer.book.calculation = CalcProperties(
+                        calcMode='auto', fullCalcOnLoad=True, forceFullCalc=True,
+                    )
+            if engine == 'openpyxl':
+                for previous_sheet, cached in previous_formula_results.items():
+                    if previous_sheet != sheet_to_use:
+                        cache_excel_formula_results(out_path, previous_sheet, cached)
+                cache_excel_formula_results(out_path, sheet_to_use, formula_results)
         except Exception as e:
             sys.exit(f"Failed to save Excel: {e}")
 
